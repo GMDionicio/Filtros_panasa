@@ -972,24 +972,30 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
     final Offset fBR = _project(xR, yB, zBot);
 
     Color colorCarcasaFrontal = const Color(0xFFE3E6E4);
+    Color statusVividColor = const Color(0xFF2E7D32); // Default green
     const Color colorLateralIzq = Color(0xFFECEFED);
     const Color colorLateralDer = Color(0xFFBDC2BF);
 
-    if (modoEstadoColor) {
-      switch (r.estado) {
-        case EstadoRejilla.operativa:
-          colorCarcasaFrontal = const Color(0xFFC8E6C9); // Verde
-          break;
-        case EstadoRejilla.alerta:
-          colorCarcasaFrontal = const Color(0xFFFFECB3); // Amarillo
-          break;
-        case EstadoRejilla.mantenimiento:
-          colorCarcasaFrontal = const Color(0xFFFFCDD2); // Rojo
-          break;
-        case EstadoRejilla.apagada:
-          colorCarcasaFrontal = const Color(0xFFCFD8DC);
-          break;
-      }
+    switch (r.estado) {
+      case EstadoRejilla.operativa:
+        statusVividColor = const Color(0xFF00E676); // Vibrant Electric Green
+        colorCarcasaFrontal =
+            modoEstadoColor ? const Color(0xFFA5D6A7) : const Color(0xFFE3E6E4);
+        break;
+      case EstadoRejilla.alerta:
+        statusVividColor = const Color(0xFFFFD600); // Vibrant Bright Yellow
+        colorCarcasaFrontal =
+            modoEstadoColor ? const Color(0xFFFFE082) : const Color(0xFFE3E6E4);
+        break;
+      case EstadoRejilla.mantenimiento:
+        statusVividColor = const Color(0xFFFF1744); // Vibrant Neon Red
+        colorCarcasaFrontal =
+            modoEstadoColor ? const Color(0xFFFF8A80) : const Color(0xFFE3E6E4);
+        break;
+      case EstadoRejilla.apagada:
+        statusVividColor = const Color(0xFF78909C);
+        colorCarcasaFrontal = const Color(0xFFCFD8DC);
+        break;
     }
 
     if (camY < yB) {
@@ -1090,15 +1096,41 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
       );
     }
 
+    // 3D Frame Outline with Vivid Traffic Light Color
     final bool esSeleccionada = r.id == seleccionadaId;
+    final Color strokeColor =
+        esSeleccionada ? Colors.cyanAccent : statusVividColor;
+
     canvas.drawPath(
       frontPath,
       Paint()
-        ..color = esSeleccionada ? Colors.cyanAccent : Colors.black38
+        ..color = strokeColor
         ..style = PaintingStyle.stroke
-        ..strokeWidth = esSeleccionada ? 2.6 : 1.0,
+        ..strokeWidth = esSeleccionada ? 3.8 : 3.0,
     );
 
+    // 3D Status LED Light Beacon on Top-Right Corner of Hood
+    final Offset ledPos =
+        _project(xR - 0.18, yT - 0.10, zTop + 0.05);
+    // Outer glow halo
+    canvas.drawCircle(
+      ledPos,
+      7.0,
+      Paint()..color = statusVividColor.withValues(alpha: 0.45),
+    );
+    // Inner LED bulb
+    canvas.drawCircle(
+      ledPos,
+      4.2,
+      Paint()..color = statusVividColor,
+    );
+    canvas.drawCircle(
+      ledPos,
+      1.8,
+      Paint()..color = Colors.white,
+    );
+
+    // Tag Badge (R01-R22) with Vivid Status Background
     if (mostrarEtiquetas || esSeleccionada) {
       final Offset centro =
           _project(r.worldX, r.worldY, zEnY(r.worldY) + 0.05);
@@ -1106,8 +1138,10 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
         text: TextSpan(
           text: r.codigo,
           style: TextStyle(
-            color: esSeleccionada ? Colors.black : Colors.white,
-            fontSize: 10,
+            color: (r.estado == EstadoRejilla.alerta && !esSeleccionada)
+                ? Colors.black
+                : Colors.white,
+            fontSize: 11,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -1116,17 +1150,30 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
 
       final bgRect = Rect.fromCenter(
         center: centro,
-        width: tp.width + 8,
-        height: tp.height + 4,
+        width: tp.width + 10,
+        height: tp.height + 6,
       );
+
+      final Color badgeBg = esSeleccionada
+          ? Colors.cyanAccent
+          : modoEstadoColor
+              ? statusVividColor
+              : Colors.black.withValues(alpha: 0.85);
+
       canvas.drawRRect(
-        RRect.fromRectAndRadius(bgRect, const Radius.circular(4)),
-        Paint()
-          ..color = esSeleccionada
-              ? Colors.cyanAccent
-              : Colors.black.withValues(alpha: 0.72),
+        RRect.fromRectAndRadius(bgRect, const Radius.circular(5)),
+        Paint()..color = badgeBg,
       );
-      tp.paint(canvas, Offset(bgRect.left + 4, bgRect.top + 2));
+      // Border around badge
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(bgRect, const Radius.circular(5)),
+        Paint()
+          ..color = Colors.white70
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0,
+      );
+
+      tp.paint(canvas, Offset(bgRect.left + 5, bgRect.top + 3));
     }
 
     return frontPath;

@@ -46,3 +46,10 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Backend local files
+backend/node_modules/
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+

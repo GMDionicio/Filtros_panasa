@@ -13,9 +13,11 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
+try { require('dotenv').config(); } catch (e) {}
+
 const app = express();
-const PORT = 3010;
-const DB_PATH = '/srv/filtros-panasa/api/filtros_panasa.db';
+const PORT = process.env.PORT || 3010;
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'filtros_panasa.db');
 
 // Middleware
 app.use(cors({
@@ -77,10 +79,10 @@ function createTables() {
         grille_code TEXT NOT NULL,
         filter_number INTEGER NOT NULL,
         position TEXT NOT NULL,
+        created_at_ts TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(grille_code) REFERENCES grilles(grille_code),
         UNIQUE(grille_code, filter_number),
-        UNIQUE(grille_code, position),
-        created_at_ts TEXT DEFAULT CURRENT_TIMESTAMP
+        UNIQUE(grille_code, position)
       )`,
       `CREATE TABLE IF NOT EXISTS filter_events (
         id TEXT PRIMARY KEY,

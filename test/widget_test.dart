@@ -2,8 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:filtros_panasa/main.dart';
 
 void main() {
-  testWidgets('FiltrosPanasaApp loads smoke test', (WidgetTester tester) async {
-    await tester.pumpWidget(const FiltrosPanasaApp());
-    expect(find.text('Filtros Panasa'), findsWidgets);
+  testWidgets('FiltrosPanasa3DApp loads smoke test', (WidgetTester tester) async {
+    await tester.pumpWidget(const FiltrosPanasa3DApp());
+    expect(find.textContaining('Filtros Panasa'), findsWidgets);
   });
 }

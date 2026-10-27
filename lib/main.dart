@@ -1,27 +1,26 @@
 import 'package:flutter/material.dart';
-import 'screens/dashboard_screen.dart';
+import 'interfaz.dart';
 
 void main() {
-  runApp(const FiltrosPanasaApp());
+  runApp(const FiltrosPanasa3DApp());
 }
 
-class FiltrosPanasaApp extends StatelessWidget {
-  const FiltrosPanasaApp({super.key});
+class FiltrosPanasa3DApp extends StatelessWidget {
+  const FiltrosPanasa3DApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Filtros Panasa',
+      title: 'Filtros Panasa — Gemelo Digital 3D',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.indigo,
-          primary: Colors.indigo,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF12161A),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF0077C8),
+          secondary: Color(0xFFE5A93B),
         ),
-        useMaterial3: true,
-        fontFamily: 'Roboto',
       ),
-      home: const DashboardScreen(),
+      home: const FachadaRejillas3DScreen(),
     );
   }
 }

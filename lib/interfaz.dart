@@ -971,30 +971,23 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
     final Offset fBL = _project(xL, yB, zBot);
     final Offset fBR = _project(xR, yB, zBot);
 
-    Color colorCarcasaFrontal = const Color(0xFFE3E6E4);
-    Color statusVividColor = const Color(0xFF2E7D32); // Default green
+    const Color colorCarcasaFrontal = Color(0xFFE3E6E4);
+    Color statusVividColor = const Color(0xFF00E676); // Default green
     const Color colorLateralIzq = Color(0xFFECEFED);
     const Color colorLateralDer = Color(0xFFBDC2BF);
 
     switch (r.estado) {
       case EstadoRejilla.operativa:
         statusVividColor = const Color(0xFF00E676); // Vibrant Electric Green
-        colorCarcasaFrontal =
-            modoEstadoColor ? const Color(0xFFA5D6A7) : const Color(0xFFE3E6E4);
         break;
       case EstadoRejilla.alerta:
         statusVividColor = const Color(0xFFFFD600); // Vibrant Bright Yellow
-        colorCarcasaFrontal =
-            modoEstadoColor ? const Color(0xFFFFE082) : const Color(0xFFE3E6E4);
         break;
       case EstadoRejilla.mantenimiento:
         statusVividColor = const Color(0xFFFF1744); // Vibrant Neon Red
-        colorCarcasaFrontal =
-            modoEstadoColor ? const Color(0xFFFF8A80) : const Color(0xFFE3E6E4);
         break;
       case EstadoRejilla.apagada:
         statusVividColor = const Color(0xFF78909C);
-        colorCarcasaFrontal = const Color(0xFFCFD8DC);
         break;
     }
 
@@ -1096,17 +1089,14 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
       );
     }
 
-    // 3D Frame Outline with Vivid Traffic Light Color
     final bool esSeleccionada = r.id == seleccionadaId;
-    final Color strokeColor =
-        esSeleccionada ? Colors.cyanAccent : statusVividColor;
 
     canvas.drawPath(
       frontPath,
       Paint()
-        ..color = strokeColor
+        ..color = esSeleccionada ? Colors.cyanAccent : Colors.black38
         ..style = PaintingStyle.stroke
-        ..strokeWidth = esSeleccionada ? 3.8 : 3.0,
+        ..strokeWidth = esSeleccionada ? 3.5 : 1.0,
     );
 
     // 3D Status LED Light Beacon on Top-Right Corner of Hood

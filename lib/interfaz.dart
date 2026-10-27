@@ -195,30 +195,53 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Filtros Panasa — Gemelo Digital 3D'),
+        title: const Text(
+          'Tiroforzados Planta Cogeneracion 13.200 VAC',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+          overflow: TextOverflow.ellipsis,
+        ),
         backgroundColor: const Color(0xFF1B2228),
         actions: [
+          FilterChip(
+            visualDensity: VisualDensity.compact,
+            label: const Text('Etiquetas', style: TextStyle(fontSize: 11)),
+            selected: _mostrarEtiquetas,
+            onSelected: (v) => setState(() => _mostrarEtiquetas = v),
+          ),
+          const SizedBox(width: 4),
+          FilterChip(
+            visualDensity: VisualDensity.compact,
+            label: const Text('Semáforo', style: TextStyle(fontSize: 11)),
+            selected: _modoEstadoColor,
+            onSelected: (v) => setState(() => _modoEstadoColor = v),
+          ),
+          const SizedBox(width: 2),
+          IconButton(
+            icon: const Icon(Icons.camera_alt_outlined, size: 18),
+            onPressed: _restaurarCamaraFoto,
+            tooltip: 'Ángulo Foto Original',
+          ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            margin: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            margin: const EdgeInsets.only(right: 4),
             decoration: BoxDecoration(
               color: _isConnected
                   ? Colors.green.shade700
                   : Colors.orange.shade800,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
             ),
             child: Row(
               children: [
                 Icon(
                   _isConnected ? Icons.wifi : Icons.wifi_off,
-                  size: 14,
+                  size: 12,
                   color: Colors.white,
                 ),
                 const SizedBox(width: 4),
                 Text(
                   _isConnected ? 'API Local' : 'Offline',
                   style: const TextStyle(
-                      fontSize: 12,
+                      fontSize: 11,
                       color: Colors.white,
                       fontWeight: FontWeight.bold),
                 ),
@@ -226,7 +249,7 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, size: 20),
             onPressed: _fetchLiveData,
             tooltip: 'Actualizar Datos',
           ),
@@ -292,153 +315,68 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
           ],
         ),
       ),
-      body: Column(
+      body: Stack(
         children: [
-          _buildBarraSuperior(),
-          Expanded(
-            child: Stack(
-              children: [
-                // Lienzo 3D interactivo
-                GestureDetector(
-                  onPanUpdate: (details) {
-                    setState(() {
-                      _camX =
-                          (_camX - details.delta.dx * 0.025).clamp(-10.0, 10.0);
-                      _camY =
-                          (_camY + details.delta.dy * 0.020).clamp(0.7, 6.5);
-                      _yaw =
-                          (_yaw + details.delta.dx * 0.0012).clamp(-0.35, 0.35);
-                      _pitch = (_pitch - details.delta.dy * 0.0012)
-                          .clamp(-0.20, 0.25);
-                    });
-                  },
-                  onTapUp: (details) => _detectarToque(details.localPosition),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      return CustomPaint(
-                        size: Size(
-                            constraints.maxWidth, constraints.maxHeight),
-                        painter: EdificioCogeneracion3DPainter(
-                          rejillas: _rejillas,
-                          seleccionadaId: _seleccionada?.id,
-                          camX: _camX,
-                          camY: _camY,
-                          camZ: _camZ,
-                          yaw: _yaw,
-                          pitch: _pitch,
-                          mostrarEtiquetas: _mostrarEtiquetas,
-                          modoEstadoColor: _modoEstadoColor,
-                          onUpdateHitPaths: (paths) {
-                            _hitPaths
-                              ..clear()
-                              ..addAll(paths);
-                          },
-                        ),
-                      );
+          // Lienzo 3D interactivo
+          GestureDetector(
+            onPanUpdate: (details) {
+              setState(() {
+                _camX =
+                    (_camX - details.delta.dx * 0.025).clamp(-10.0, 10.0);
+                _camY =
+                    (_camY + details.delta.dy * 0.020).clamp(0.7, 6.5);
+                _yaw =
+                    (_yaw + details.delta.dx * 0.0012).clamp(-0.35, 0.35);
+                _pitch = (_pitch - details.delta.dy * 0.0012)
+                    .clamp(-0.20, 0.25);
+              });
+            },
+            onTapUp: (details) => _detectarToque(details.localPosition),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return CustomPaint(
+                  size: Size(constraints.maxWidth, constraints.maxHeight),
+                  painter: EdificioCogeneracion3DPainter(
+                    rejillas: _rejillas,
+                    seleccionadaId: _seleccionada?.id,
+                    camX: _camX,
+                    camY: _camY,
+                    camZ: _camZ,
+                    yaw: _yaw,
+                    pitch: _pitch,
+                    mostrarEtiquetas: _mostrarEtiquetas,
+                    modoEstadoColor: _modoEstadoColor,
+                    onUpdateHitPaths: (paths) {
+                      _hitPaths
+                        ..clear()
+                        ..addAll(paths);
                     },
                   ),
-                ),
-
-                // Controles flotantes de cámara y zoom
-                Positioned(
-                  left: 16,
-                  bottom: 16,
-                  child: _buildControlesCamara(),
-                ),
-
-                // Panel de telemetría y mantenimiento al seleccionar una de las 22 rejillas
-                if (_seleccionada != null)
-                  Positioned(
-                    right: 16,
-                    bottom: 16,
-                    child: _buildPanelInspector(_seleccionada!),
-                  ),
-              ],
+                );
+              },
             ),
           ),
+
+          // Controles flotantes de cámara y zoom
+          Positioned(
+            left: 16,
+            bottom: 16,
+            child: _buildControlesCamara(),
+          ),
+
+          // Panel de telemetría y mantenimiento al seleccionar una de las 22 rejillas
+          if (_seleccionada != null)
+            Positioned(
+              right: 16,
+              bottom: 16,
+              child: _buildPanelInspector(_seleccionada!),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildBarraSuperior() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1B2228),
-        border: Border(bottom: BorderSide(color: Colors.white12)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1F4E3B),
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(
-                    color: Colors.greenAccent.withValues(alpha: 0.4),
-                  ),
-                ),
-                child: const Text(
-                  'PLANTA DE COGENERACIÓN 13.200VAC',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 10,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  '22 Rejillas (MG-01..MG-03)',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: Colors.white70, fontSize: 11),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                FilterChip(
-                  visualDensity: VisualDensity.compact,
-                  label: const Text('Etiquetas', style: TextStyle(fontSize: 11)),
-                  selected: _mostrarEtiquetas,
-                  onSelected: (v) => setState(() => _mostrarEtiquetas = v),
-                ),
-                const SizedBox(width: 6),
-                FilterChip(
-                  visualDensity: VisualDensity.compact,
-                  label: const Text('Semáforo SCADA',
-                      style: TextStyle(fontSize: 11)),
-                  selected: _modoEstadoColor,
-                  onSelected: (v) => setState(() => _modoEstadoColor = v),
-                ),
-                const SizedBox(width: 6),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  onPressed: _restaurarCamaraFoto,
-                  icon: const Icon(Icons.camera_alt_outlined, size: 14),
-                  label: const Text('Ángulo Foto',
-                      style: TextStyle(fontSize: 11)),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+
 
   Widget _buildControlesCamara() {
     return Container(

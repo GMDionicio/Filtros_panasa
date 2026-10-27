@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
+import '../interfaz.dart';
 import 'grille_detail_screen.dart';
 import 'employees_screen.dart';
 import 'settings_screen.dart';
@@ -151,8 +152,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
               ListTile(
-                leading: const Icon(Icons.grid_view, color: Colors.indigo),
-                title: const Text('Panel de Rejillas (R01 - R22)'),
+                leading: const Icon(Icons.threed_rotation, color: Colors.indigo),
+                title: const Text('Gemelo Digital 3D (Modelo 3D)'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const FachadaRejillas3DScreen()),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.view_quilt, color: Colors.indigo),
+                title: const Text('Elevación Fachada 2D (Por Bloques)'),
                 onTap: () => Navigator.pop(context),
               ),
               ListTile(

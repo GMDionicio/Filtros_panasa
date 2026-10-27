@@ -195,53 +195,64 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        titleSpacing: 0,
         title: const Text(
-          'Tiroforzados Planta Cogeneracion 13.200 VAC',
+          'Tiroforzados Cogeneracion 13.200VAC',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
           overflow: TextOverflow.ellipsis,
         ),
         backgroundColor: const Color(0xFF1B2228),
         actions: [
-          FilterChip(
-            visualDensity: VisualDensity.compact,
-            label: const Text('Etiquetas', style: TextStyle(fontSize: 11)),
-            selected: _mostrarEtiquetas,
-            onSelected: (v) => setState(() => _mostrarEtiquetas = v),
-          ),
-          const SizedBox(width: 4),
-          FilterChip(
-            visualDensity: VisualDensity.compact,
-            label: const Text('Semáforo', style: TextStyle(fontSize: 11)),
-            selected: _modoEstadoColor,
-            onSelected: (v) => setState(() => _modoEstadoColor = v),
-          ),
-          const SizedBox(width: 2),
           IconButton(
-            icon: const Icon(Icons.camera_alt_outlined, size: 18),
+            visualDensity: VisualDensity.compact,
+            icon: Icon(
+              _mostrarEtiquetas ? Icons.label : Icons.label_outlined,
+              color: _mostrarEtiquetas ? Colors.amber : Colors.white54,
+              size: 20,
+            ),
+            tooltip: _mostrarEtiquetas
+                ? 'Ocultar Etiquetas'
+                : 'Mostrar Etiquetas (R01-R22)',
+            onPressed: () => setState(() => _mostrarEtiquetas = !_mostrarEtiquetas),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: Icon(
+              _modoEstadoColor ? Icons.traffic : Icons.traffic_outlined,
+              color: _modoEstadoColor ? Colors.amber : Colors.white54,
+              size: 20,
+            ),
+            tooltip: _modoEstadoColor ? 'Modo Normal' : 'Modo Semáforo SCADA',
+            onPressed: () => setState(() => _modoEstadoColor = !_modoEstadoColor),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.camera_alt_outlined, size: 20, color: Colors.white70),
             onPressed: _restaurarCamaraFoto,
             tooltip: 'Ángulo Foto Original',
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            margin: const EdgeInsets.only(right: 4),
+            margin: const EdgeInsets.symmetric(horizontal: 2),
             decoration: BoxDecoration(
               color: _isConnected
-                  ? Colors.green.shade700
+                  ? Colors.green.shade800
                   : Colors.orange.shade800,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
                   _isConnected ? Icons.wifi : Icons.wifi_off,
-                  size: 12,
+                  size: 11,
                   color: Colors.white,
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 3),
                 Text(
                   _isConnected ? 'API Local' : 'Offline',
                   style: const TextStyle(
-                      fontSize: 11,
+                      fontSize: 10,
                       color: Colors.white,
                       fontWeight: FontWeight.bold),
                 ),
@@ -249,6 +260,7 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
             ),
           ),
           IconButton(
+            visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.refresh, size: 20),
             onPressed: _fetchLiveData,
             tooltip: 'Actualizar Datos',

@@ -363,19 +363,15 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
 
   Widget _buildBarraSuperior() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: const BoxDecoration(
         color: Color(0xFF1B2228),
         border: Border(bottom: BorderSide(color: Colors.white12)),
       ),
-      child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 12,
-        runSpacing: 8,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -390,39 +386,54 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
                   'PLANTA DE COGENERACIÓN 13.200VAC',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 11,
-                    letterSpacing: 0.6,
+                    fontSize: 10,
+                    letterSpacing: 0.5,
                   ),
                 ),
               ),
               const SizedBox(width: 8),
-              const Text(
-                '22 Rejillas (MG-01, MG-02, MG-03)',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
+              const Expanded(
+                child: Text(
+                  '22 Rejillas (MG-01..MG-03)',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: Colors.white70, fontSize: 11),
+                ),
               ),
             ],
           ),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              FilterChip(
-                label: const Text('Etiquetas (R01-R22)'),
-                selected: _mostrarEtiquetas,
-                onSelected: (v) => setState(() => _mostrarEtiquetas = v),
-              ),
-              const SizedBox(width: 8),
-              FilterChip(
-                label: const Text('Semáforo SCADA'),
-                selected: _modoEstadoColor,
-                onSelected: (v) => setState(() => _modoEstadoColor = v),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: _restaurarCamaraFoto,
-                icon: const Icon(Icons.camera_alt_outlined, size: 16),
-                label: const Text('Ángulo Foto'),
-              ),
-            ],
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                FilterChip(
+                  visualDensity: VisualDensity.compact,
+                  label: const Text('Etiquetas', style: TextStyle(fontSize: 11)),
+                  selected: _mostrarEtiquetas,
+                  onSelected: (v) => setState(() => _mostrarEtiquetas = v),
+                ),
+                const SizedBox(width: 6),
+                FilterChip(
+                  visualDensity: VisualDensity.compact,
+                  label: const Text('Semáforo SCADA',
+                      style: TextStyle(fontSize: 11)),
+                  selected: _modoEstadoColor,
+                  onSelected: (v) => setState(() => _modoEstadoColor = v),
+                ),
+                const SizedBox(width: 6),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  onPressed: _restaurarCamaraFoto,
+                  icon: const Icon(Icons.camera_alt_outlined, size: 14),
+                  label: const Text('Ángulo Foto',
+                      style: TextStyle(fontSize: 11)),
+                ),
+              ],
+            ),
           ),
         ],
       ),

@@ -68,10 +68,10 @@ class _BlockingLoginScreenState extends State<BlockingLoginScreen> {
         return;
       }
 
-      // 2. Fallback local contra la lista de empleados
+      // 2. Fallback local contra la lista de empleados autorizados
       final empList = await _employeeRepository.getEmployees();
       final matched = empList.firstWhere(
-        (e) => e.payrollCode.toUpperCase() == inputCode,
+        (e) => e.payrollCode.trim().toUpperCase() == inputCode,
         orElse: () => Employee(payrollCode: '', name: ''),
       );
 
@@ -81,26 +81,29 @@ class _BlockingLoginScreenState extends State<BlockingLoginScreen> {
           widget.onLoginSuccess({'code': matched.payrollCode, 'name': matched.name});
         }
       } else {
-        // Permitir inicio de sesión si la lista local está vacía
-        if (empList.isEmpty) {
-          final defaultName = 'Operario $inputCode';
-          await _authRepository.saveActiveOperator(inputCode, defaultName);
-          await _employeeRepository.addEmployee(inputCode, defaultName);
-          if (mounted) {
-            widget.onLoginSuccess({'code': inputCode, 'name': defaultName});
-          }
-        } else {
-          setState(() {
-            _errorMessage = 'Código de nómina "$inputCode" no encontrado en el sistema.';
-          });
-        }
+        setState(() {
+          _errorMessage = 'Código de nómina "$inputCode" no registrado en el sistema de la planta.';
+        });
       }
     } catch (e) {
-      final defaultName = 'Operario $inputCode';
-      await _authRepository.saveActiveOperator(inputCode, defaultName);
-      if (mounted) {
-        widget.onLoginSuccess({'code': inputCode, 'name': defaultName});
-      }
+      try {
+        final localEmps = await _employeeRepository.getEmployees();
+        final matched = localEmps.firstWhere(
+          (e) => e.payrollCode.trim().toUpperCase() == inputCode,
+          orElse: () => Employee(payrollCode: '', name: ''),
+        );
+        if (matched.payrollCode.isNotEmpty) {
+          await _authRepository.saveActiveOperator(matched.payrollCode, matched.name);
+          if (mounted) {
+            widget.onLoginSuccess({'code': matched.payrollCode, 'name': matched.name});
+          }
+          return;
+        }
+      } catch (_) {}
+
+      setState(() {
+        _errorMessage = 'No se pudo verificar el código "$inputCode". Ingrese un código de nómina registrado.';
+      });
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

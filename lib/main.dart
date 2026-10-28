@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'blocs/grille_cubit.dart';
 import 'interfaz.dart';
+import 'screens/dashboard_screen.dart';
+import 'screens/employees_screen.dart';
 
 void main() {
   runApp(const FiltrosPanasa3DApp());
@@ -47,7 +49,13 @@ class FiltrosPanasa3DApp extends StatelessWidget {
             surface: Color(0xFF1B2228),
           ),
         ),
-        home: const FachadaRejillas3DScreen(),
+        initialRoute: '/',
+        routes: {
+          '/': (context) => const FachadaRejillas3DScreen(),
+          '/3d': (context) => const FachadaRejillas3DScreen(),
+          '/2d': (context) => const DashboardScreen(),
+          '/employees': (context) => const EmployeesScreen(),
+        },
       ),
     );
   }

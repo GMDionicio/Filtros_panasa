@@ -67,11 +67,54 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
     }
   }
 
+  Future<void> _deleteEmployee(String payrollCode) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar eliminación'),
+        content: Text('¿Desea eliminar al operario $payrollCode?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final success = await ApiService.deleteEmployee(payrollCode);
+      if (success) {
+        _fetchEmployees();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Operario eliminado correctamente.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Gestión de Operarios'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.cyanAccent),
+            tooltip: 'Actualizar lista',
+            onPressed: _fetchEmployees,
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -129,16 +172,22 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Personal Registrado',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.cyanAccent,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Personal Registrado',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.cyanAccent,
+                  ),
                 ),
-              ),
+                Text(
+                  '${_employees.length} operario(s)',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             Expanded(
@@ -195,10 +244,12 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                                   'Código Nómina: ${emp.payrollCode}',
                                   style: const TextStyle(color: Colors.white70),
                                 ),
-                                trailing: const Icon(
-                                  Icons.check_circle,
-                                  color: Color(0xFF00E676),
-                                  size: 20,
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.delete_outline,
+                                      color: Colors.redAccent, size: 20),
+                                  tooltip: 'Eliminar operario',
+                                  onPressed: () =>
+                                      _deleteEmployee(emp.payrollCode),
                                 ),
                               ),
                             );

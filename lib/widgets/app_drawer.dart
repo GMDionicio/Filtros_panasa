@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
-import '../interfaz.dart';
-import '../screens/dashboard_screen.dart';
-import '../screens/employees_screen.dart';
 import '../services/local_db_service.dart';
 import 'admin_auth_dialog.dart';
-import 'operator_login_dialog.dart';
 
 class AppDrawer extends StatefulWidget {
   final String currentRoute;
@@ -28,26 +24,6 @@ class _AppDrawerState extends State<AppDrawer> {
     final op = await LocalDbService.getActiveOperator();
     if (mounted) {
       setState(() => _activeOperator = op);
-    }
-  }
-
-  Future<void> _switchOperator() async {
-    final result = await OperatorLoginDialog.show(context, canDismiss: true);
-    if (result != null && mounted) {
-      setState(() => _activeOperator = result);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Sesión iniciada como: ${result['name']} (${result['code']})'),
-          backgroundColor: Colors.green.shade800,
-        ),
-      );
-    }
-  }
-
-  Future<void> _logout() async {
-    await LocalDbService.clearActiveOperator();
-    if (mounted) {
-      setState(() => _activeOperator = null);
     }
   }
 
@@ -85,38 +61,6 @@ class _AppDrawerState extends State<AppDrawer> {
             ),
           ),
           
-          // Operator session controls
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: const Color(0xFF1B2228),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    _activeOperator != null
-                        ? 'Operario: ${_activeOperator!['code']}'
-                        : 'Acceso no autenticado',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: _switchOperator,
-                  style: TextButton.styleFrom(foregroundColor: Colors.cyanAccent),
-                  icon: Icon(_activeOperator != null ? Icons.sync : Icons.login, size: 16),
-                  label: Text(_activeOperator != null ? 'Cambiar' : 'Ingresar'),
-                ),
-                if (_activeOperator != null)
-                  IconButton(
-                    icon: const Icon(Icons.logout, color: Colors.redAccent, size: 18),
-                    onPressed: _logout,
-                    tooltip: 'Cerrar Sesión',
-                  ),
-              ],
-            ),
-          ),
-          const Divider(color: Colors.white24, height: 1),
-
           ListTile(
             leading: const Icon(Icons.threed_rotation, color: Colors.cyanAccent),
             title: const Text('Gemelo Digital 3D', style: TextStyle(color: Colors.white)),
@@ -125,10 +69,7 @@ class _AppDrawerState extends State<AppDrawer> {
             onTap: () {
               Navigator.pop(context);
               if (widget.currentRoute != '3d') {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const FachadaRejillas3DScreen()),
-                );
+                Navigator.pushReplacementNamed(context, '/3d');
               }
             },
           ),
@@ -140,10 +81,7 @@ class _AppDrawerState extends State<AppDrawer> {
             onTap: () {
               Navigator.pop(context);
               if (widget.currentRoute != '2d') {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const DashboardScreen()),
-                );
+                Navigator.pushReplacementNamed(context, '/2d');
               }
             },
           ),
@@ -155,10 +93,7 @@ class _AppDrawerState extends State<AppDrawer> {
             onTap: () {
               Navigator.pop(context);
               if (widget.currentRoute != 'employees') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const EmployeesScreen()),
-                );
+                Navigator.pushNamed(context, '/employees');
               }
             },
           ),

@@ -6,11 +6,6 @@ import 'local_db_service.dart';
 
 class ApiService {
   static String get defaultBaseUrl {
-    if (kIsWeb) {
-      if (Uri.base.host == 'localhost' || Uri.base.host == '127.0.0.1') {
-        return 'http://localhost:3010';
-      }
-    }
     return 'https://panasa.gmnodo.com';
   }
 
@@ -38,7 +33,9 @@ class ApiService {
   static Future<void> initBaseUrl() async {
     if (_initialized) return;
     final savedUrl = await LocalDbService.getSetting('base_url');
-    if (savedUrl != null && savedUrl.trim().isNotEmpty) {
+    if (savedUrl != null &&
+        savedUrl.trim().isNotEmpty &&
+        !savedUrl.contains('localhost:3010')) {
       baseUrl = sanitizeUrl(savedUrl);
     } else {
       baseUrl = defaultBaseUrl;
@@ -50,6 +47,26 @@ class ApiService {
   static Future<void> updateBaseUrl(String newUrl) async {
     baseUrl = sanitizeUrl(newUrl);
     await LocalDbService.saveSetting('base_url', baseUrl);
+  }
+
+  /// Construye cabeceras HTTP de autenticación y licencia requeridas por el backend
+  static Future<Map<String, String>> _getAuthHeaders() async {
+    final Map<String, String> headers = {
+      'Content-Type': 'application/json',
+    };
+
+    final activeOp = await LocalDbService.getActiveOperator();
+    if (activeOp != null && activeOp['token'] != null && activeOp['token']!.isNotEmpty) {
+      headers['Authorization'] = 'Bearer ${activeOp['token']}';
+    }
+
+    final deviceId = await LocalDbService.getSetting('device_id') ?? (kIsWeb ? 'WEB-BROWSER' : 'EMULATOR-001');
+    headers['X-Device-ID'] = deviceId;
+
+    final licenseKey = await LocalDbService.getSetting('license_key') ?? 'PAN-PRODUCTION-2026';
+    headers['X-License-Key'] = licenseKey;
+
+    return headers;
   }
 
   /// Consulta el estado general del sistema (licencia activa, si existen operarios creados y si existen rejillas)
@@ -301,6 +318,7 @@ class ApiService {
 
     for (var item in pending) {
       try {
+        final headers = await _getAuthHeaders();
         final body = jsonEncode({
           'eventId': item['event_id'],
           'grilleCode': item['grille_code'],
@@ -314,7 +332,7 @@ class ApiService {
         final response = await http
             .post(
               Uri.parse('$baseUrl/api/events'),
-              headers: {'Content-Type': 'application/json'},
+              headers: headers,
               body: body,
             )
             .timeout(const Duration(seconds: 8));
@@ -335,8 +353,9 @@ class ApiService {
   static Future<List<Grille>> getGrilles() async {
     await initBaseUrl();
     try {
+      final headers = await _getAuthHeaders();
       final response = await http
-          .get(Uri.parse('$baseUrl/api/grilles'))
+          .get(Uri.parse('$baseUrl/api/grilles'), headers: headers)
           .timeout(const Duration(seconds: 8));
 
       if (response.statusCode == 200) {
@@ -350,7 +369,7 @@ class ApiService {
         Map<String, FilterEvent> latestEvents = {};
         try {
           final eventsResponse = await http
-              .get(Uri.parse('$baseUrl/api/events'))
+              .get(Uri.parse('$baseUrl/api/events'), headers: headers)
               .timeout(const Duration(seconds: 8));
           if (eventsResponse.statusCode == 200) {
             final eventsData = jsonDecode(eventsResponse.body);
@@ -433,6 +452,7 @@ class ApiService {
 
     // 1. Envío directo al Servidor Online
     try {
+      final headers = await _getAuthHeaders();
       final eventId = 'EVT-${now.millisecondsSinceEpoch}-$filterNumber';
       final body = jsonEncode({
         'eventId': eventId,
@@ -447,7 +467,7 @@ class ApiService {
       final response = await http
           .post(
             Uri.parse('$baseUrl/api/events'),
-            headers: {'Content-Type': 'application/json'},
+            headers: headers,
             body: body,
           )
           .timeout(const Duration(seconds: 8));
@@ -490,19 +510,26 @@ class ApiService {
   static Future<List<Employee>> getEmployees() async {
     await initBaseUrl();
     try {
+      final headers = await _getAuthHeaders();
       final response = await http
-          .get(Uri.parse('$baseUrl/api/employees'))
-          .timeout(const Duration(seconds: 5));
+          .get(
+            Uri.parse('$baseUrl/api/employees'),
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 8));
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final List list = data['employees'] ?? [];
-        if (list.isNotEmpty) {
-          final employees = list.map((e) => Employee.fromJson(e)).toList();
-          await LocalDbService.saveEmployees(employees);
-          return employees;
-        }
+        final employees = list.map((e) => Employee.fromJson(e)).toList();
+        await LocalDbService.saveEmployees(employees);
+        return employees;
+      } else {
+        debugPrint('getEmployees HTTP error: ${response.statusCode} - ${response.body}');
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error obteniendo empleados del servidor online: $e');
+    }
 
     return await LocalDbService.loadEmployees();
   }
@@ -511,26 +538,31 @@ class ApiService {
   static Future<bool> addEmployee(String payrollCode, String name) async {
     await initBaseUrl();
     try {
+      final headers = await _getAuthHeaders();
       final response = await http
           .post(
             Uri.parse('$baseUrl/api/employees'),
-            headers: {'Content-Type': 'application/json'},
+            headers: headers,
             body: jsonEncode({'payrollCode': payrollCode, 'name': name}),
           )
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 8));
 
       if (response.statusCode == 200) {
         final newEmp = Employee(payrollCode: payrollCode, name: name);
         final current = await LocalDbService.loadEmployees();
+        current.removeWhere((e) => e.payrollCode == payrollCode);
         current.add(newEmp);
         await LocalDbService.saveEmployees(current);
         return true;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error agregando empleado en servidor online: $e');
+    }
 
     if (!kIsWeb) {
       final newEmp = Employee(payrollCode: payrollCode, name: name);
       final current = await LocalDbService.loadEmployees();
+      current.removeWhere((e) => e.payrollCode == payrollCode);
       current.add(newEmp);
       await LocalDbService.saveEmployees(current);
       return true;
@@ -544,11 +576,13 @@ class ApiService {
     await initBaseUrl();
     final cleanCode = payrollCode.trim();
     try {
+      final headers = await _getAuthHeaders();
       final response = await http
           .delete(
             Uri.parse('$baseUrl/api/employees/${Uri.encodeComponent(cleanCode)}'),
+            headers: headers,
           )
-          .timeout(const Duration(seconds: 6));
+          .timeout(const Duration(seconds: 8));
 
       if (response.statusCode == 200) {
         await LocalDbService.deleteEmployee(cleanCode);

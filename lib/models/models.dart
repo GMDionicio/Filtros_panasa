@@ -188,3 +188,77 @@ class FilterEvent {
     );
   }
 }
+
+enum EstadoRejilla { operativa, alerta, mantenimiento, apagada }
+
+class CameraState {
+  final double camX;
+  final double camY;
+  final double camZ;
+  final double yaw;
+  final double pitch;
+
+  const CameraState({
+    required this.camX,
+    required this.camY,
+    required this.camZ,
+    required this.yaw,
+    required this.pitch,
+  });
+
+  CameraState copyWith({
+    double? camX,
+    double? camY,
+    double? camZ,
+    double? yaw,
+    double? pitch,
+  }) {
+    return CameraState(
+      camX: camX ?? this.camX,
+      camY: camY ?? this.camY,
+      camZ: camZ ?? this.camZ,
+      yaw: yaw ?? this.yaw,
+      pitch: pitch ?? this.pitch,
+    );
+  }
+}
+
+class RejillaModel {
+  final int id; // 1 a 22
+  final String codigo; // R01 a R22
+  final int fila; // 0 = Superior, 1 = Inferior
+  final int bloque; // 0 = MG-01 (Izq), 1 = MG-02 (Centro), 2 = MG-03 (Der)
+  final int indiceEnFila; // 0 a 10
+  final double worldX; // Posición X en el muro 3D
+  final double worldY; // Posición Y en el muro 3D
+  double temperaturaC;
+  double caudalPorcentaje;
+  Grille? liveGrille;
+
+  RejillaModel({
+    required this.id,
+    required this.codigo,
+    required this.fila,
+    required this.bloque,
+    required this.indiceEnFila,
+    required this.worldX,
+    required this.worldY,
+    this.temperaturaC = 38.5,
+    this.caudalPorcentaje = 85.0,
+    this.liveGrille,
+  });
+
+  /// Deriva dinámicamente el estado del modelo inmutable de dominio Grille (SSOT)
+  EstadoRejilla get estado {
+    if (liveGrille == null) return EstadoRejilla.operativa;
+    switch (liveGrille!.status) {
+      case GrilleStatus.ok:
+        return EstadoRejilla.operativa;
+      case GrilleStatus.warning:
+        return EstadoRejilla.alerta;
+      case GrilleStatus.urgent:
+        return EstadoRejilla.mantenimiento;
+    }
+  }
+}
+

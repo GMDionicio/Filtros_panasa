@@ -84,6 +84,11 @@ app.use(cors({
       return callback(null, true);
     }
 
+    // Permitir clientes web locales (localhost / 127.0.0.1) únicamente fuera de Producción
+    if (NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      return callback(null, true);
+    }
+
     // Permitir dominios de panasa / gmnodo en producción
     if (NODE_ENV === 'production' && /^https:\/\/(.*\.)?gmnodo\.com$/.test(origin)) {
       return callback(null, true);
@@ -294,6 +299,18 @@ async function createTables() {
 
   for (const sql of stmts) {
     await dbRun(sql);
+  }
+
+  // Migraciones de esquema seguras para bases de datos SQLite existentes
+  const migrations = [
+    `ALTER TABLE employees ADD COLUMN active INTEGER DEFAULT 1`,
+    `ALTER TABLE employees ADD COLUMN created_at_ts TEXT DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE operator_sessions ADD COLUMN active INTEGER DEFAULT 1`,
+    `ALTER TABLE licenses ADD COLUMN status TEXT DEFAULT 'active'`,
+    `ALTER TABLE filter_events ADD COLUMN notes TEXT`,
+  ];
+  for (const m of migrations) {
+    try { await dbRun(m); } catch (_) {}
   }
 
   // Auto-seed de rejillas si la tabla grilles está vacía
@@ -900,8 +917,13 @@ app.post('/api/sync/restore', async (req, res, next) => {
 
 app.get('/api/employees', async (req, res, next) => {
   try {
-    const rows = await dbQueryAll(`SELECT payroll_code, name, active FROM employees WHERE active = 1 ORDER BY name ASC`);
-    res.json({ employees: rows });
+    let rows;
+    try {
+      rows = await dbQueryAll(`SELECT payroll_code, name, active FROM employees WHERE active = 1 ORDER BY name ASC`);
+    } catch (_) {
+      rows = await dbQueryAll(`SELECT payroll_code, name FROM employees ORDER BY name ASC`);
+    }
+    res.json({ employees: rows || [] });
   } catch (err) {
     next(err);
   }
@@ -917,10 +939,17 @@ app.post('/api/employees', async (req, res, next) => {
     const code = String(payrollCode).trim();
     const empName = String(name).trim();
 
-    await dbRun(
-      `INSERT OR REPLACE INTO employees (payroll_code, name, active, created_at_ts) VALUES (?, ?, 1, CURRENT_TIMESTAMP)`,
-      [code, empName]
-    );
+    try {
+      await dbRun(
+        `INSERT OR REPLACE INTO employees (payroll_code, name, active, created_at_ts) VALUES (?, ?, 1, CURRENT_TIMESTAMP)`,
+        [code, empName]
+      );
+    } catch (_) {
+      await dbRun(
+        `INSERT OR REPLACE INTO employees (payroll_code, name) VALUES (?, ?)`,
+        [code, empName]
+      );
+    }
 
     res.json({ success: true, payrollCode: code, name: empName });
   } catch (err) {

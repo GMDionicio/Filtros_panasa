@@ -43,11 +43,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Color _getStatusColor(GrilleStatus status) {
     switch (status) {
       case GrilleStatus.ok:
-        return Colors.green.shade600;
+        return const Color(0xFF00E676); // Vivid Green
       case GrilleStatus.warning:
-        return Colors.orange.shade700;
+        return const Color(0xFFFFD600); // Vivid Yellow
       case GrilleStatus.urgent:
-        return Colors.red.shade700;
+        return const Color(0xFFFF1744); // Vivid Red
     }
   }
 
@@ -76,16 +76,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+
     return DefaultTabController(
       length: 4,
       child: Scaffold(
-        backgroundColor: Colors.grey.shade100,
+        backgroundColor: const Color(0xFF12161A),
         appBar: AppBar(
           title: const Text(
-            'Filtros Panasa',
-            style: TextStyle(fontWeight: FontWeight.bold),
+            'Filtros Panasa — Elevación 2D',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
-          backgroundColor: Colors.indigo,
+          backgroundColor: const Color(0xFF1B2228),
           foregroundColor: Colors.white,
           actions: [
             Container(
@@ -93,7 +96,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               margin: const EdgeInsets.only(right: 8),
               decoration: BoxDecoration(
                 color: _isConnected
-                    ? Colors.green.shade700
+                    ? Colors.green.shade800
                     : Colors.orange.shade800,
                 borderRadius: BorderRadius.circular(16),
               ),
@@ -123,9 +126,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
           bottom: const TabBar(
             isScrollable: true,
-            indicatorColor: Colors.amber,
+            indicatorColor: Colors.cyanAccent,
             indicatorWeight: 3,
-            labelColor: Colors.white,
+            labelColor: Colors.cyanAccent,
             unselectedLabelColor: Colors.white70,
             labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             tabs: [
@@ -137,23 +140,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
         drawer: Drawer(
+          backgroundColor: const Color(0xFF12161A),
           child: ListView(
             padding: EdgeInsets.zero,
             children: [
               UserAccountsDrawerHeader(
-                decoration: const BoxDecoration(color: Colors.indigo),
+                decoration: const BoxDecoration(color: Color(0xFF1B2228)),
                 accountName: const Text('Filtros Panasa App',
                     style:
                         TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                 accountEmail: const Text('Gestión de Aire Acondicionado'),
                 currentAccountPicture: const CircleAvatar(
-                  backgroundColor: Colors.white,
-                  child: Icon(Icons.air, size: 38, color: Colors.indigo),
+                  backgroundColor: Colors.cyanAccent,
+                  child: Icon(Icons.air, size: 38, color: Colors.black),
                 ),
               ),
               ListTile(
-                leading: const Icon(Icons.threed_rotation, color: Colors.indigo),
-                title: const Text('Gemelo Digital 3D (Modelo 3D)'),
+                leading:
+                    const Icon(Icons.threed_rotation, color: Colors.cyanAccent),
+                title: const Text('Gemelo Digital 3D (Modelo 3D)',
+                    style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(
@@ -164,13 +170,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.view_quilt, color: Colors.indigo),
-                title: const Text('Elevación Fachada 2D (Por Bloques)'),
+                leading:
+                    const Icon(Icons.view_quilt, color: Colors.cyanAccent),
+                title: const Text('Elevación Fachada 2D (Por Bloques)',
+                    style: TextStyle(color: Colors.white)),
                 onTap: () => Navigator.pop(context),
               ),
               ListTile(
-                leading: const Icon(Icons.people, color: Colors.indigo),
-                title: const Text('Gestión de Empleados / Nómina'),
+                leading: const Icon(Icons.people, color: Colors.cyanAccent),
+                title: const Text('Gestión de Empleados / Nómina',
+                    style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(
@@ -179,10 +188,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   );
                 },
               ),
-              const Divider(),
+              const Divider(color: Colors.white24),
               ListTile(
-                leading: const Icon(Icons.settings, color: Colors.indigo),
-                title: const Text('Configuración & Servidor API'),
+                leading: const Icon(Icons.settings, color: Colors.cyanAccent),
+                title: const Text('Configuración & Servidor API',
+                    style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(
@@ -201,53 +211,59 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ? const Center(child: CircularProgressIndicator())
             : Column(
                 children: [
-                  // Summary Banner
-                  Container(
-                    color: Colors.white,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            _buildSummaryCard('Al Día (<15d)', _countOk,
-                                Colors.green.shade600, GrilleStatus.ok),
-                            const SizedBox(width: 8),
-                            _buildSummaryCard('Atención (≥15d)', _countWarning,
-                                Colors.orange.shade700, GrilleStatus.warning),
-                            const SizedBox(width: 8),
-                            _buildSummaryCard('Urgente (≥20d)', _countUrgent,
-                                Colors.red.shade700, GrilleStatus.urgent),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        // Search
-                        TextField(
-                          decoration: InputDecoration(
-                            hintText: 'Buscar por código (ej. R01, R15)...',
-                            prefixIcon:
-                                const Icon(Icons.search, color: Colors.indigo),
-                            suffixIcon: _searchQuery.isNotEmpty
-                                ? IconButton(
-                                    icon: const Icon(Icons.close, size: 20),
-                                    onPressed: () {
-                                      setState(() => _searchQuery = '');
-                                    },
-                                  )
-                                : null,
-                            isDense: true,
-                            contentPadding: const EdgeInsets.all(8),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
+                  // Responsive Banner
+                  if (!isLandscape) ...[
+                    Container(
+                      color: const Color(0xFF1B2228),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              _buildSummaryCard('Al Día (<15d)', _countOk,
+                                  const Color(0xFF00E676), GrilleStatus.ok),
+                              const SizedBox(width: 8),
+                              _buildSummaryCard(
+                                  'Atención (≥15d)',
+                                  _countWarning,
+                                  const Color(0xFFFFD600),
+                                  GrilleStatus.warning),
+                              const SizedBox(width: 8),
+                              _buildSummaryCard(
+                                  'Urgente (≥20d)',
+                                  _countUrgent,
+                                  const Color(0xFFFF1744),
+                                  GrilleStatus.urgent),
+                            ],
                           ),
-                          onChanged: (val) {
-                            setState(() => _searchQuery = val);
-                          },
-                        ),
-                      ],
+                          const SizedBox(height: 8),
+                          _buildSearchField(),
+                        ],
+                      ),
                     ),
-                  ),
+                  ] else ...[
+                    // Ultra Compact Horizontal Banner in Landscape
+                    Container(
+                      color: const Color(0xFF1B2228),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      child: Row(
+                        children: [
+                          _buildMiniBadge(
+                              'Al Día (<15d)', _countOk, const Color(0xFF00E676)),
+                          const SizedBox(width: 6),
+                          _buildMiniBadge('Atención (≥15d)', _countWarning,
+                              const Color(0xFFFFD600)),
+                          const SizedBox(width: 6),
+                          _buildMiniBadge('Urgente (≥20d)', _countUrgent,
+                              const Color(0xFFFF1744)),
+                          const SizedBox(width: 12),
+                          Expanded(child: _buildSearchField()),
+                        ],
+                      ),
+                    ),
+                  ],
 
                   // Tab Views
                   Expanded(
@@ -262,6 +278,66 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ],
               ),
+      ),
+    );
+  }
+
+  Widget _buildSearchField() {
+    return TextField(
+      style: const TextStyle(color: Colors.white, fontSize: 13),
+      decoration: InputDecoration(
+        hintText: 'Buscar por código (ej. R01, R15)...',
+        hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+        prefixIcon:
+            const Icon(Icons.search, color: Colors.cyanAccent, size: 18),
+        suffixIcon: _searchQuery.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.close, size: 18, color: Colors.white70),
+                onPressed: () {
+                  setState(() => _searchQuery = '');
+                },
+              )
+            : null,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        filled: true,
+        fillColor: Colors.black26,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Colors.white24),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Colors.white24),
+        ),
+      ),
+      onChanged: (val) {
+        setState(() => _searchQuery = val);
+      },
+    );
+  }
+
+  Widget _buildMiniBadge(String label, int count, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.2),
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$count ',
+            style: TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 13, color: color),
+          ),
+          Text(
+            label,
+            style: TextStyle(fontSize: 10, color: color),
+          ),
+        ],
       ),
     );
   }
@@ -309,9 +385,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (grillesInBlock.isEmpty) {
       return Card(
+        color: const Color(0xFF1B2228),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Text('No hay rejillas que coincidan en $blockCode.'),
+          child: Text(
+            'No hay rejillas que coincidan en $blockCode.',
+            style: const TextStyle(color: Colors.white70),
+          ),
         ),
       );
     }
@@ -320,11 +400,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final lowerRow = grillesInBlock.where((g) => !g.isUpperRow).toList();
 
     return Card(
-      elevation: 3,
+      elevation: 4,
+      color: const Color(0xFF1B2228),
       margin: const EdgeInsets.only(bottom: 16),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.indigo.shade200, width: 2),
+        side: const BorderSide(color: Colors.white24, width: 1.5),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12.0),
@@ -335,7 +416,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.indigo,
+                color: const Color(0xFF0077C8),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
@@ -364,16 +445,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
             // Upper Row Header
             if (upperRow.isNotEmpty) ...[
-              Row(
+              const Row(
                 children: [
-                  const Icon(Icons.arrow_upward, size: 16, color: Colors.indigo),
-                  const SizedBox(width: 4),
+                  Icon(Icons.arrow_upward, size: 16, color: Colors.cyanAccent),
+                  SizedBox(width: 4),
                   Text(
-                    'FILA SUPERIOR (${upperRow.length} Rejillas)',
+                    'FILA SUPERIOR',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: Colors.indigo.shade900,
+                      color: Colors.cyanAccent,
+                      letterSpacing: 0.5,
                     ),
                   ),
                 ],
@@ -384,7 +466,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: upperRow.length > 3 ? 4 : 3,
-                  childAspectRatio: 0.9,
+                  childAspectRatio: 0.95,
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 8,
                 ),
@@ -398,17 +480,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
             // Lower Row Header
             if (lowerRow.isNotEmpty) ...[
-              Row(
+              const Row(
                 children: [
-                  const Icon(Icons.arrow_downward,
-                      size: 16, color: Colors.indigo),
-                  const SizedBox(width: 4),
+                  Icon(Icons.arrow_downward,
+                      size: 16, color: Colors.cyanAccent),
+                  SizedBox(width: 4),
                   Text(
-                    'FILA INFERIOR (${lowerRow.length} Rejillas)',
+                    'FILA INFERIOR',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: Colors.indigo.shade900,
+                      color: Colors.cyanAccent,
+                      letterSpacing: 0.5,
                     ),
                   ),
                 ],
@@ -419,7 +502,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: lowerRow.length > 3 ? 4 : 3,
-                  childAspectRatio: 0.9,
+                  childAspectRatio: 0.95,
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 8,
                 ),
@@ -435,7 +518,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Visual Tile representing a single physical grille in the facade
+  // High Contrast Visual Tile representing a single physical grille
   Widget _buildGrilleTile(Grille grille) {
     final statusColor = _getStatusColor(grille.status);
     final maxDays = grille.maxDaysWithoutMaintenance;
@@ -454,9 +537,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       },
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.all(6),
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: statusColor.withOpacity(0.08),
+          color: const Color(0xFF232B32),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: statusColor, width: 2),
         ),
@@ -470,8 +553,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   grille.code,
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                    color: Colors.indigo,
+                    fontSize: 16,
+                    color: Colors.cyanAccent,
                   ),
                 ),
                 Container(
@@ -480,6 +563,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: statusColor,
+                    boxShadow: [
+                      BoxShadow(
+                        color: statusColor.withValues(alpha: 0.6),
+                        blurRadius: 4,
+                        spreadRadius: 1,
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -490,10 +580,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: TextStyle(
                 color: statusColor,
                 fontWeight: FontWeight.bold,
-                fontSize: 13,
+                fontSize: 14,
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: grille.filters.map((f) {
@@ -528,7 +618,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
           decoration: BoxDecoration(
-            color: isSelected ? color : color.withOpacity(0.12),
+            color: isSelected ? color : color.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: color, width: isSelected ? 2 : 1),
           ),
@@ -539,7 +629,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: isSelected ? Colors.white : color,
+                  color: isSelected ? Colors.black : color,
                 ),
               ),
               Text(
@@ -548,7 +638,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: isSelected ? Colors.white : color,
+                  color: isSelected ? Colors.black : color,
                 ),
               ),
             ],

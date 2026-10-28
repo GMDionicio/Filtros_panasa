@@ -50,7 +50,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Empleado agregado correctamente.'),
+            content: Text('Operario agregado correctamente.'),
             backgroundColor: Colors.green,
           ),
         );
@@ -59,7 +59,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Error al guardar empleado.'),
+            content: Text('Error al guardar operario.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -71,28 +71,30 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Gestión de Empleados / Nómina'),
-        backgroundColor: Colors.indigo,
-        foregroundColor: Colors.white,
+        title: const Text('Gestión de Operarios'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
             Card(
-              elevation: 2,
               child: Padding(
                 padding: const EdgeInsets.all(12.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text(
-                      'Nuevo Empleado',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      'Nuevo Operario',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.cyanAccent,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     TextField(
                       controller: _codeController,
+                      style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
                         labelText: 'Código de Nómina (ej. EMP-005)',
                         border: OutlineInputBorder(),
@@ -102,6 +104,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: _nameController,
+                      style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(
                         labelText: 'Nombre Completo',
                         border: OutlineInputBorder(),
@@ -111,12 +114,15 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                     const SizedBox(height: 10),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.indigo,
-                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.cyanAccent,
+                        foregroundColor: Colors.black,
                       ),
                       onPressed: _addEmployee,
                       icon: const Icon(Icons.person_add),
-                      label: const Text('Agregar Empleado'),
+                      label: const Text(
+                        'Agregar Operario',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ],
                 ),
@@ -127,34 +133,77 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
               alignment: Alignment.centerLeft,
               child: Text(
                 'Personal Registrado',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.cyanAccent,
+                ),
               ),
             ),
             const SizedBox(height: 8),
             Expanded(
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
-                  : ListView.builder(
-                      itemCount: _employees.length,
-                      itemBuilder: (context, index) {
-                        final emp = _employees[index];
-                        return Card(
-                          child: ListTile(
-                            leading: const CircleAvatar(
-                              backgroundColor: Colors.indigo,
-                              child: Icon(Icons.person, color: Colors.white),
-                            ),
-                            title: Text(emp.name),
-                            subtitle: Text('Código Nómina: ${emp.payrollCode}'),
-                            trailing: const Icon(
-                              Icons.check_circle,
-                              color: Colors.green,
-                              size: 20,
+                  : _employees.isEmpty
+                      ? Card(
+                          color: const Color(0xFF1B2228),
+                          child: const Padding(
+                            padding: EdgeInsets.all(24.0),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.people_outline,
+                                    size: 48, color: Colors.white38),
+                                SizedBox(height: 12),
+                                Text(
+                                  'Sin personal registrado',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                      color: Colors.white70),
+                                ),
+                                SizedBox(height: 6),
+                                Text(
+                                  'Ingresa un código de nómina y nombre arriba para registrar al primer operario.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.white38),
+                                ),
+                              ],
                             ),
                           ),
-                        );
-                      },
-                    ),
+                        )
+                      : ListView.builder(
+                          itemCount: _employees.length,
+                          itemBuilder: (context, index) {
+                            final emp = _employees[index];
+                            return Card(
+                              child: ListTile(
+                                leading: const CircleAvatar(
+                                  backgroundColor: Color(0xFF0077C8),
+                                  child:
+                                      Icon(Icons.person, color: Colors.white),
+                                ),
+                                title: Text(
+                                  emp.name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  'Código Nómina: ${emp.payrollCode}',
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                                trailing: const Icon(
+                                  Icons.check_circle,
+                                  color: Color(0xFF00E676),
+                                  size: 20,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
             ),
           ],
         ),

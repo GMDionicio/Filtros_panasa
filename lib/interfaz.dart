@@ -1,15 +1,49 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'blocs/grille_cubit.dart';
 import 'models/models.dart';
-import 'services/api_service.dart';
 import 'screens/maintenance_dialog.dart';
-import 'screens/employees_screen.dart';
-import 'screens/settings_screen.dart';
-import 'screens/dashboard_screen.dart';
-
-
+import 'services/api_service.dart';
+import 'services/local_db_service.dart';
+import 'widgets/app_drawer.dart';
+import 'widgets/initial_setup_dialog.dart';
+import 'widgets/operator_login_dialog.dart';
+import 'widgets/product_activation_dialog.dart';
 
 enum EstadoRejilla { operativa, alerta, mantenimiento, apagada }
+
+class CameraState {
+  final double camX;
+  final double camY;
+  final double camZ;
+  final double yaw;
+  final double pitch;
+
+  const CameraState({
+    required this.camX,
+    required this.camY,
+    required this.camZ,
+    required this.yaw,
+    required this.pitch,
+  });
+
+  CameraState copyWith({
+    double? camX,
+    double? camY,
+    double? camZ,
+    double? yaw,
+    double? pitch,
+  }) {
+    return CameraState(
+      camX: camX ?? this.camX,
+      camY: camY ?? this.camY,
+      camZ: camZ ?? this.camZ,
+      yaw: yaw ?? this.yaw,
+      pitch: pitch ?? this.pitch,
+    );
+  }
+}
 
 class RejillaModel {
   final int id; // 1 a 22
@@ -19,7 +53,6 @@ class RejillaModel {
   final int indiceEnFila; // 0 a 10
   final double worldX; // Posición X en el muro 3D
   final double worldY; // Posición Y en el muro 3D
-  EstadoRejilla estado;
   double temperaturaC;
   double caudalPorcentaje;
   Grille? liveGrille;
@@ -32,11 +65,23 @@ class RejillaModel {
     required this.indiceEnFila,
     required this.worldX,
     required this.worldY,
-    this.estado = EstadoRejilla.operativa,
     this.temperaturaC = 38.5,
     this.caudalPorcentaje = 85.0,
     this.liveGrille,
   });
+
+  /// Deriva dinámicamente el estado del modelo inmutable de dominio Grille (SSOT)
+  EstadoRejilla get estado {
+    if (liveGrille == null) return EstadoRejilla.operativa;
+    switch (liveGrille!.status) {
+      case GrilleStatus.ok:
+        return EstadoRejilla.operativa;
+      case GrilleStatus.warning:
+        return EstadoRejilla.alerta;
+      case GrilleStatus.urgent:
+        return EstadoRejilla.mantenimiento;
+    }
+  }
 }
 
 class FachadaRejillas3DScreen extends StatefulWidget {
@@ -51,117 +96,267 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
   late final List<RejillaModel> _rejillas;
   RejillaModel? _seleccionada;
   bool _isConnected = false;
+  Map<String, String>? _activeOperator;
 
-  // Parámetros de cámara 3D calibrados con el punto de vista exacto de la foto real
-  double _camX = -2.35;
-  double _camY = 1.75;
-  double _camZ = 14.8;
-  double _yaw = 0.03;
-  double _pitch = 0.04;
+  // Notificador reactivo aislado para los parámetros de cámara 3D (evita re-ejecutar build() de toda la pantalla)
+  late final ValueNotifier<CameraState> _cameraNotifier;
 
   bool _mostrarEtiquetas = true;
   bool _modoEstadoColor = true;
-
-  // Polígonos proyectados en 2D para detección exacta de clics en 3D
-  final Map<int, Path> _hitPaths = {};
 
   @override
   void initState() {
     super.initState();
     _rejillas = _inicializar22Rejillas();
-    _fetchLiveData();
+    _cameraNotifier = ValueNotifier(const CameraState(
+      camX: -2.35,
+      camY: 1.75,
+      camZ: 14.8,
+      yaw: 0.03,
+      pitch: 0.04,
+    ));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkOperatorLogin();
+    });
   }
 
-  Future<void> _fetchLiveData() async {
-    final isHealthOk = await ApiService.checkHealth();
-    final liveList = await ApiService.getGrilles();
+  Future<void> _checkOperatorLogin() async {
+    const deviceId = 'WEB-DEVICE-001';
 
-    if (mounted) {
-      setState(() {
-        _isConnected = isHealthOk;
-        _syncWithLiveData(liveList);
-      });
+    // 1. Consultar estado general del sistema (licencia y empleados)
+    final status = await ApiService.checkSystemStatus(deviceId: deviceId);
+    if (!mounted) return;
+
+    // 2. Si el producto NO está activado, exigir activación por Licencia + PIN Admin
+    bool isActivated = status?['isActivated'] == true;
+    while (!isActivated && mounted) {
+      isActivated = await ProductActivationDialog.show(context, deviceId: deviceId);
     }
+    if (!mounted) return;
+
+    // 3. Si no existen operarios creados en el sistema, ejecutar Onboarding / Configuración Inicial
+    bool hasEmployees = status?['hasEmployees'] == true;
+    if (!hasEmployees && mounted) {
+      final setupResult = await InitialSetupDialog.show(context);
+      if (setupResult != null && mounted) {
+        setState(() => _activeOperator = setupResult);
+        context.read<GrilleCubit>().loadGrilles();
+        return;
+      }
+    }
+    if (!mounted) return;
+
+    // 4. Verificar si existe sesión de operario activa en servidor online
+    final onlineSession = await ApiService.checkOperatorSession(deviceId: deviceId);
+    if (onlineSession != null && onlineSession['active'] == true && mounted) {
+      final code = onlineSession['payrollCode'] as String;
+      final name = onlineSession['name'] as String;
+      await LocalDbService.saveActiveOperator(code, name);
+      setState(() => _activeOperator = {'code': code, 'name': name});
+      return;
+    }
+
+    // 5. Verificar sesión guardada localmente o pedir Login de Operario
+    final active = await LocalDbService.getActiveOperator();
+    if (mounted) {
+      if (active != null) {
+        setState(() => _activeOperator = active);
+      } else {
+        Map<String, String>? result;
+        while (result == null && mounted) {
+          result = await OperatorLoginDialog.show(context, canDismiss: false);
+        }
+        if (result != null && mounted) {
+          setState(() => _activeOperator = result);
+        }
+      }
+    }
+  }
+
+  Future<void> _openOperatorLogin() async {
+    final canDismiss = _activeOperator != null;
+    final result = await OperatorLoginDialog.show(context, canDismiss: canDismiss);
+    if (result != null && mounted) {
+      setState(() => _activeOperator = result);
+    }
+  }
+
+  @override
+  void dispose() {
+    _cameraNotifier.dispose();
+    super.dispose();
+  }
+
+  void _fetchLiveData() {
+    context.read<GrilleCubit>().loadGrilles();
   }
 
   void _syncWithLiveData(List<Grille> liveGrilles) {
-    Map<String, Grille> grilleMap = {};
-    for (var g in liveGrilles) {
-      grilleMap[g.code] = g;
-      grilleMap[g.code.replaceAll('R', 'R-')] = g;
-    }
+    final Map<String, Grille> grilleMap = {
+      for (var g in liveGrilles) g.code: g,
+      for (var g in liveGrilles) g.code.replaceAll('R', 'R-'): g,
+    };
 
     for (var r in _rejillas) {
       final codeNorm = r.codigo.replaceAll('-', '');
-      final liveG = grilleMap[codeNorm] ?? grilleMap[r.codigo];
-      if (liveG != null) {
-        r.liveGrille = liveG;
-        switch (liveG.status) {
-          case GrilleStatus.ok:
-            r.estado = EstadoRejilla.operativa;
-            break;
-          case GrilleStatus.warning:
-            r.estado = EstadoRejilla.alerta;
-            break;
-          case GrilleStatus.urgent:
-            r.estado = EstadoRejilla.mantenimiento;
-            break;
-        }
-      }
+      r.liveGrille = grilleMap[codeNorm] ?? grilleMap[r.codigo];
     }
   }
 
   List<RejillaModel> _inicializar22Rejillas() {
     final List<RejillaModel> lista = [];
     final List<double> posicionesX = [
-      // MG-01 Bloque Izquierdo (4 rejillas)
+      // MG-01 Bloque Izquierdo (4 columnas: 0..3)
       -9.30, -7.55, -5.80, -4.05,
-      // MG-02 Bloque Central (3 rejillas)
+      // MG-02 Bloque Central (3 columnas: 4..6)
       -1.65, 0.10, 1.85,
-      // MG-03 Bloque Derecho (4 rejillas)
+      // MG-03 Bloque Derecho (4 columnas: 7..10)
       4.15, 5.90, 7.65, 9.40,
     ];
 
-    int contador = 1;
-    for (int fila = 0; fila < 2; fila++) {
-      final double posY = fila == 0 ? 3.55 : 1.95;
+    // Estructura de bloques de rejillas según elevación 2D real:
+    // MG-01: Superior [R01..R04], Inferior [R05..R08]
+    // MG-02: Superior [R09..R11], Inferior [R12..R14]
+    // MG-03: Superior [R15..R18], Inferior [R19..R22]
+    final List<Map<String, dynamic>> defBloques = [
+      {'bloque': 0, 'cols': [0, 1, 2, 3], 'topRange': [1, 4], 'botRange': [5, 8]},
+      {'bloque': 1, 'cols': [4, 5, 6], 'topRange': [9, 11], 'botRange': [12, 14]},
+      {'bloque': 2, 'cols': [7, 8, 9, 10], 'topRange': [15, 18], 'botRange': [19, 22]},
+    ];
 
-      for (int col = 0; col < 11; col++) {
-        final int bloque = col < 4 ? 0 : (col < 7 ? 1 : 2);
-        final String codeStr = 'R${contador.toString().padLeft(2, '0')}';
-        lista.add(
-          RejillaModel(
-            id: contador,
-            codigo: codeStr,
-            fila: fila,
-            bloque: bloque,
-            indiceEnFila: col,
-            worldX: posicionesX[col],
-            worldY: posY,
-            temperaturaC: 36.0 + (contador % 5) * 1.8,
-            caudalPorcentaje: 80.0 + (contador % 4) * 5.0,
-          ),
-        );
-        contador++;
+    for (var b in defBloques) {
+      final int bloque = b['bloque'];
+      final List<int> cols = b['cols'];
+      final List<int> topRange = b['topRange'];
+      final List<int> botRange = b['botRange'];
+
+      // Fila Superior (fila = 0, posY = 3.55)
+      for (int i = 0; i < cols.length; i++) {
+        final int id = topRange[0] + i;
+        final int colIdx = cols[i];
+        lista.add(RejillaModel(
+          id: id,
+          codigo: 'R${id.toString().padLeft(2, '0')}',
+          fila: 0,
+          bloque: bloque,
+          indiceEnFila: colIdx,
+          worldX: posicionesX[colIdx],
+          worldY: 3.55,
+          temperaturaC: 36.0 + (id % 5) * 1.8,
+          caudalPorcentaje: 80.0 + (id % 4) * 5.0,
+        ));
+      }
+
+      // Fila Inferior (fila = 1, posY = 1.95)
+      for (int i = 0; i < cols.length; i++) {
+        final int id = botRange[0] + i;
+        final int colIdx = cols[i];
+        lista.add(RejillaModel(
+          id: id,
+          codigo: 'R${id.toString().padLeft(2, '0')}',
+          fila: 1,
+          bloque: bloque,
+          indiceEnFila: colIdx,
+          worldX: posicionesX[colIdx],
+          worldY: 1.95,
+          temperaturaC: 36.0 + (id % 5) * 1.8,
+          caudalPorcentaje: 80.0 + (id % 4) * 5.0,
+        ));
       }
     }
     return lista;
   }
 
   void _restaurarCamaraFoto() {
-    setState(() {
-      _camX = -2.35;
-      _camY = 1.75;
-      _camZ = 14.8;
-      _yaw = 0.03;
-      _pitch = 0.04;
-    });
+    _cameraNotifier.value = const CameraState(
+      camX: -2.35,
+      camY: 1.75,
+      camZ: 14.8,
+      yaw: 0.03,
+      pitch: 0.04,
+    );
   }
 
-  void _detectarToque(Offset localPosition) {
-    for (final r in _rejillas.reversed) {
-      final path = _hitPaths[r.id];
-      if (path != null && path.contains(localPosition)) {
+  /// Calcula la proyección 2D del área táctil para hit testing al tocar
+  Path _calcularHitPathParaRejilla(RejillaModel r, Size size) {
+    final cam = _cameraNotifier.value;
+    final focalLength = size.width * 0.62;
+    final screenCenter = Offset(size.width * 0.47, size.height * 0.56);
+
+    Offset project(double wx, double wy, double wz) {
+      double dx = wx - cam.camX;
+      double dy = wy - cam.camY;
+      double dz = wz - cam.camZ;
+
+      final double cosY = math.cos(cam.yaw);
+      final double sinY = math.sin(cam.yaw);
+      final double rx = dx * cosY - dz * sinY;
+      final double rz1 = dx * sinY + dz * cosY;
+
+      final double cosP = math.cos(cam.pitch);
+      final double sinP = math.sin(cam.pitch);
+      final double ry = dy * cosP - rz1 * sinP;
+      final double rz = dy * sinP + rz1 * cosP;
+
+      final double depth = (-rz).clamp(0.4, 200.0);
+      final double sx = screenCenter.dx + (rx / depth) * focalLength;
+      final double sy = screenCenter.dy - (ry / depth) * focalLength;
+      return Offset(sx, sy);
+    }
+
+    const double halfW = 0.77;
+    const double halfH = 0.62;
+    const double zWall = 0.0;
+    const double zTop = 0.92;
+    const double zBot = 0.36;
+
+    final double xL = r.worldX - halfW;
+    final double xR = r.worldX + halfW;
+    final double yT = r.worldY + halfH;
+    final double yB = r.worldY - halfH;
+
+    // Todos los puntos 3D proyectados (carcasa, visera y etiqueta R01-R22)
+    final pts = [
+      project(xL, yT, zWall),
+      project(xR, yT, zWall),
+      project(xR, yB, zWall),
+      project(xL, yB, zWall),
+      project(xL, yT, zTop),
+      project(xR, yT, zTop),
+      project(xR, yB, zBot),
+      project(xL, yB, zBot),
+      project(r.worldX, r.worldY, zTop + 0.05),
+    ];
+
+    double minX = pts.first.dx;
+    double maxX = pts.first.dx;
+    double minY = pts.first.dy;
+    double maxY = pts.first.dy;
+
+    for (final p in pts) {
+      if (p.dx < minX) minX = p.dx;
+      if (p.dx > maxX) maxX = p.dx;
+      if (p.dy < minY) minY = p.dy;
+      if (p.dy > maxY) maxY = p.dy;
+    }
+
+    // Margen holgado táctil (12px) para sensibilidad perfecta en pantallas móviles
+    final rect = Rect.fromLTRB(minX, minY, maxX, maxY).inflate(12.0);
+    return Path()..addRect(rect);
+  }
+
+  void _detectarToque(Offset localPosition, Size canvasSize) {
+    final cam = _cameraNotifier.value;
+    final List<RejillaModel> ordenadas = List.of(_rejillas)
+      ..sort((a, b) {
+        final distA = (a.worldX - cam.camX).abs() + (a.worldY - cam.camY).abs() * 0.4;
+        final distB = (b.worldX - cam.camX).abs() + (b.worldY - cam.camY).abs() * 0.4;
+        return distA.compareTo(distB);
+      });
+
+    for (final r in ordenadas) {
+      final path = _calcularHitPathParaRejilla(r, canvasSize);
+      if (path.contains(localPosition)) {
         setState(() {
           _seleccionada = (_seleccionada?.id == r.id) ? null : r;
         });
@@ -179,8 +374,8 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
     );
 
     if (result == true) {
-      _fetchLiveData();
       if (mounted) {
+        context.read<GrilleCubit>().loadGrilles();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('✅ Mantenimiento registrado y guardado en SQLite.'),
@@ -193,202 +388,217 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
-        title: const Text(
-          'Tiroforzados Cogeneracion 13.200VAC',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-          overflow: TextOverflow.ellipsis,
-        ),
-        backgroundColor: const Color(0xFF1B2228),
-        actions: [
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: Icon(
-              _mostrarEtiquetas ? Icons.label : Icons.label_outlined,
-              color: _mostrarEtiquetas ? Colors.amber : Colors.white54,
-              size: 20,
+    return BlocConsumer<GrilleCubit, GrilleState>(
+      listener: (context, state) {
+        if (state is GrilleLoaded) {
+          setState(() {
+            _isConnected = state.isConnected;
+            _syncWithLiveData(state.grilles);
+          });
+        }
+      },
+      builder: (context, state) {
+        if (state is GrilleLoaded && _rejillas.first.liveGrille == null) {
+          _isConnected = state.isConnected;
+          _syncWithLiveData(state.grilles);
+        }
+
+        return Scaffold(
+          appBar: AppBar(
+            titleSpacing: 0,
+            title: const Text(
+              'Tiroforzados Cogeneracion 13.200VAC',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              overflow: TextOverflow.ellipsis,
             ),
-            tooltip: _mostrarEtiquetas
-                ? 'Ocultar Etiquetas'
-                : 'Mostrar Etiquetas (R01-R22)',
-            onPressed: () => setState(() => _mostrarEtiquetas = !_mostrarEtiquetas),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: Icon(
-              _modoEstadoColor ? Icons.traffic : Icons.traffic_outlined,
-              color: _modoEstadoColor ? Colors.amber : Colors.white54,
-              size: 20,
-            ),
-            tooltip: _modoEstadoColor ? 'Modo Normal' : 'Modo Semáforo SCADA',
-            onPressed: () => setState(() => _modoEstadoColor = !_modoEstadoColor),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.camera_alt_outlined, size: 20, color: Colors.white70),
-            onPressed: _restaurarCamaraFoto,
-            tooltip: 'Ángulo Foto Original',
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            decoration: BoxDecoration(
-              color: _isConnected
-                  ? Colors.green.shade800
-                  : Colors.orange.shade800,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  _isConnected ? Icons.wifi : Icons.wifi_off,
-                  size: 11,
-                  color: Colors.white,
+            backgroundColor: const Color(0xFF1B2228),
+            actions: [
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  _mostrarEtiquetas ? Icons.label : Icons.label_outlined,
+                  color: _mostrarEtiquetas ? Colors.amber : Colors.white54,
+                  size: 20,
                 ),
-                const SizedBox(width: 3),
-                Text(
-                  _isConnected ? 'API Local' : 'Offline',
-                  style: const TextStyle(
-                      fontSize: 10,
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.refresh, size: 20),
-            onPressed: _fetchLiveData,
-            tooltip: 'Actualizar Datos',
-          ),
-        ],
-      ),
-      drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            UserAccountsDrawerHeader(
-              decoration: const BoxDecoration(color: Color(0xFF1B2228)),
-              accountName: const Text('Filtros Panasa App',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-              accountEmail: const Text('Gemelo Digital 3D & Mantenimiento'),
-              currentAccountPicture: const CircleAvatar(
-                backgroundColor: Colors.cyanAccent,
-                child: Icon(Icons.threed_rotation,
-                    size: 36, color: Colors.black),
+                tooltip: _mostrarEtiquetas
+                    ? 'Ocultar Etiquetas'
+                    : 'Mostrar Etiquetas (R01-R22)',
+                onPressed: () =>
+                    setState(() => _mostrarEtiquetas = !_mostrarEtiquetas),
               ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.threed_rotation, color: Colors.cyanAccent),
-              title: const Text('Gemelo Digital 3D'),
-              onTap: () => Navigator.pop(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.view_quilt, color: Colors.cyanAccent),
-              title: const Text('Elevación Fachada 2D (Por Bloques)'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const DashboardScreen()),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.people, color: Colors.cyanAccent),
-              title: const Text('Gestión de Empleados / Nómina'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const EmployeesScreen()),
-                );
-              },
-            ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.settings, color: Colors.cyanAccent),
-              title: const Text('Configuración & Servidor API'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        SettingsScreen(onRefreshNeeded: _fetchLiveData),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-      body: Stack(
-        children: [
-          // Lienzo 3D interactivo
-          GestureDetector(
-            onPanUpdate: (details) {
-              setState(() {
-                _camX =
-                    (_camX - details.delta.dx * 0.025).clamp(-10.0, 10.0);
-                _camY =
-                    (_camY + details.delta.dy * 0.020).clamp(0.7, 6.5);
-                _yaw =
-                    (_yaw + details.delta.dx * 0.0012).clamp(-0.35, 0.35);
-                _pitch = (_pitch - details.delta.dy * 0.0012)
-                    .clamp(-0.20, 0.25);
-              });
-            },
-            onTapUp: (details) => _detectarToque(details.localPosition),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                return CustomPaint(
-                  size: Size(constraints.maxWidth, constraints.maxHeight),
-                  painter: EdificioCogeneracion3DPainter(
-                    rejillas: _rejillas,
-                    seleccionadaId: _seleccionada?.id,
-                    camX: _camX,
-                    camY: _camY,
-                    camZ: _camZ,
-                    yaw: _yaw,
-                    pitch: _pitch,
-                    mostrarEtiquetas: _mostrarEtiquetas,
-                    modoEstadoColor: _modoEstadoColor,
-                    onUpdateHitPaths: (paths) {
-                      _hitPaths
-                        ..clear()
-                        ..addAll(paths);
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  _modoEstadoColor ? Icons.traffic : Icons.traffic_outlined,
+                  color: _modoEstadoColor ? Colors.amber : Colors.white54,
+                  size: 20,
+                ),
+                tooltip:
+                    _modoEstadoColor ? 'Modo Normal' : 'Modo Semáforo SCADA',
+                onPressed: () =>
+                    setState(() => _modoEstadoColor = !_modoEstadoColor),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.camera_alt_outlined,
+                    size: 20, color: Colors.white70),
+                onPressed: _restaurarCamaraFoto,
+                tooltip: 'Ángulo Foto Original',
+              ),
+              Builder(
+                builder: (context) {
+                  final pendingCount =
+                      state is GrilleLoaded ? state.pendingCount : 0;
+                  final badgeColor = _isConnected
+                      ? (pendingCount > 0
+                          ? Colors.amber.shade900
+                          : Colors.green.shade800)
+                      : (pendingCount > 0
+                          ? Colors.orange.shade900
+                          : Colors.blueGrey.shade800);
+                  final badgeText = _isConnected
+                      ? (pendingCount > 0
+                          ? 'Sincronizando ($pendingCount)'
+                          : 'API Local')
+                      : (pendingCount > 0
+                          ? 'Modo Local ($pendingCount pend.)'
+                          : 'Modo Local');
+
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      InkWell(
+                        onTap: _openOperatorLogin,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          margin: const EdgeInsets.symmetric(horizontal: 2),
+                          decoration: BoxDecoration(
+                            color: _activeOperator != null ? Colors.cyan.shade900 : Colors.blueGrey.shade900,
+                            border: Border.all(color: _activeOperator != null ? Colors.cyanAccent : Colors.white24),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.person, size: 11, color: Colors.cyanAccent),
+                              const SizedBox(width: 3),
+                              Text(
+                                _activeOperator != null ? _activeOperator!['code']! : 'Ingresar',
+                                style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        decoration: BoxDecoration(
+                          color: badgeColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _isConnected ? Icons.wifi : Icons.sd_storage,
+                              size: 11,
+                              color: Colors.white,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              badgeText,
+                              style: const TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.refresh, size: 20),
+                onPressed: _fetchLiveData,
+                tooltip: 'Actualizar Datos',
+              ),
+            ],
+          ),
+          drawer: const AppDrawer(currentRoute: '3d'),
+          body: Stack(
+            children: [
+              // Lienzo 3D interactivo aislado con ValueListenableBuilder + RepaintBoundary
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final canvasSize =
+                      Size(constraints.maxWidth, constraints.maxHeight);
+                  return ValueListenableBuilder<CameraState>(
+                    valueListenable: _cameraNotifier,
+                    builder: (context, cam, child) {
+                      return GestureDetector(
+                        onPanUpdate: (details) {
+                          _cameraNotifier.value = cam.copyWith(
+                            camX: (cam.camX - details.delta.dx * 0.025)
+                                .clamp(-10.0, 10.0),
+                            camY: (cam.camY + details.delta.dy * 0.020)
+                                .clamp(0.7, 6.5),
+                            yaw: (cam.yaw + details.delta.dx * 0.0012)
+                                .clamp(-0.35, 0.35),
+                            pitch: (cam.pitch - details.delta.dy * 0.0012)
+                                .clamp(-0.20, 0.25),
+                          );
+                        },
+                        onTapUp: (details) {
+                          _detectarToque(details.localPosition, canvasSize);
+                        },
+                        child: RepaintBoundary(
+                          child: CustomPaint(
+                            size: canvasSize,
+                            painter: EdificioCogeneracion3DPainter(
+                              rejillas: _rejillas,
+                              seleccionadaId: _seleccionada?.id,
+                              camX: cam.camX,
+                              camY: cam.camY,
+                              camZ: cam.camZ,
+                              yaw: cam.yaw,
+                              pitch: cam.pitch,
+                              mostrarEtiquetas: _mostrarEtiquetas,
+                              modoEstadoColor: _modoEstadoColor,
+                            ),
+                          ),
+                        ),
+                      );
                     },
-                  ),
-                );
-              },
-            ),
-          ),
+                  );
+                },
+              ),
 
-          // Controles flotantes de cámara y zoom
-          Positioned(
-            left: 16,
-            bottom: 16,
-            child: _buildControlesCamara(),
-          ),
+              // Controles flotantes de cámara y zoom
+              Positioned(
+                left: 16,
+                bottom: 16,
+                child: _buildControlesCamara(),
+              ),
 
-          // Panel de telemetría y mantenimiento al seleccionar una de las 22 rejillas
-          if (_seleccionada != null)
-            Positioned(
-              right: 16,
-              bottom: 16,
-              child: _buildPanelInspector(_seleccionada!),
-            ),
-        ],
-      ),
+              // Panel de telemetría y mantenimiento al seleccionar una de las 22 rejillas
+              if (_seleccionada != null)
+                Positioned(
+                  right: 16,
+                  bottom: 16,
+                  child: _buildPanelInspector(_seleccionada!),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
-
-
 
   Widget _buildControlesCamara() {
     return Container(
@@ -413,16 +623,24 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
             constraints: const BoxConstraints(),
             padding: const EdgeInsets.all(4),
             icon: const Icon(Icons.zoom_in, size: 20, color: Colors.white),
-            onPressed: () =>
-                setState(() => _camZ = (_camZ - 1.2).clamp(8.5, 22.0)),
+            onPressed: () {
+              final cam = _cameraNotifier.value;
+              _cameraNotifier.value = cam.copyWith(
+                camZ: (cam.camZ - 1.2).clamp(8.5, 22.0),
+              );
+            },
           ),
           IconButton(
             tooltip: 'Alejar',
             constraints: const BoxConstraints(),
             padding: const EdgeInsets.all(4),
             icon: const Icon(Icons.zoom_out, size: 20, color: Colors.white),
-            onPressed: () =>
-                setState(() => _camZ = (_camZ + 1.2).clamp(8.5, 22.0)),
+            onPressed: () {
+              final cam = _cameraNotifier.value;
+              _cameraNotifier.value = cam.copyWith(
+                camZ: (cam.camZ + 1.2).clamp(8.5, 22.0),
+              );
+            },
           ),
         ],
       ),
@@ -596,7 +814,6 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
   final double pitch;
   final bool mostrarEtiquetas;
   final bool modoEstadoColor;
-  final ValueChanged<Map<int, Path>> onUpdateHitPaths;
 
   EdificioCogeneracion3DPainter({
     required this.rejillas,
@@ -608,7 +825,6 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
     required this.pitch,
     required this.mostrarEtiquetas,
     required this.modoEstadoColor,
-    required this.onUpdateHitPaths,
   });
 
   late double _focalLength;
@@ -649,8 +865,6 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
     _focalLength = size.width * 0.62;
     _screenCenter = Offset(size.width * 0.47, size.height * 0.56);
 
-    final Map<int, Path> nuevosHitPaths = {};
-
     _dibujarCieloNublado(canvas, size);
     _dibujarVialidadYPiso3D(canvas, size);
     _dibujarCubiertasSuperiores3D(canvas);
@@ -664,13 +878,10 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
       });
 
     for (final r in ordenadas) {
-      final pathFrontal = _dibujarRejillaCapota3D(canvas, r);
-      nuevosHitPaths[r.id] = pathFrontal;
+      _dibujarRejillaCapota3D(canvas, r);
     }
 
     _dibujarPostesIluminacion3D(canvas);
-
-    onUpdateHitPaths(nuevosHitPaths);
   }
 
   void _dibujarCieloNublado(Canvas canvas, Size size) {
@@ -938,7 +1149,7 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
     );
   }
 
-  Path _dibujarRejillaCapota3D(Canvas canvas, RejillaModel r) {
+  void _dibujarRejillaCapota3D(Canvas canvas, RejillaModel r) {
     const double halfW = 0.77;
     const double halfH = 0.62;
     const double zWall = 0.0;
@@ -1165,8 +1376,6 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
 
       tp.paint(canvas, Offset(bgRect.left + 5, bgRect.top + 3));
     }
-
-    return frontPath;
   }
 
   void _dibujarPostesIluminacion3D(Canvas canvas) {
@@ -1194,6 +1403,15 @@ class EdificioCogeneracion3DPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant EdificioCogeneracion3DPainter oldDelegate) =>
-      true;
+  bool shouldRepaint(covariant EdificioCogeneracion3DPainter oldDelegate) {
+    return oldDelegate.camX != camX ||
+        oldDelegate.camY != camY ||
+        oldDelegate.camZ != camZ ||
+        oldDelegate.yaw != yaw ||
+        oldDelegate.pitch != pitch ||
+        oldDelegate.seleccionadaId != seleccionadaId ||
+        oldDelegate.mostrarEtiquetas != mostrarEtiquetas ||
+        oldDelegate.modoEstadoColor != modoEstadoColor ||
+        oldDelegate.rejillas != rejillas;
+  }
 }

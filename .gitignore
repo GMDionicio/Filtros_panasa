@@ -52,4 +52,5 @@ backend/node_modules/
 backend/*.db
 backend/*.db-shm
 backend/*.db-wal
+backend/.env
 

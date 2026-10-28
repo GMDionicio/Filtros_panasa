@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../blocs/grille_cubit.dart';
 import '../models/models.dart';
 import 'maintenance_dialog.dart';
 
 class GrilleDetailScreen extends StatefulWidget {
   final Grille grille;
-  final VoidCallback onRefreshNeeded;
 
   const GrilleDetailScreen({
     super.key,
     required this.grille,
-    required this.onRefreshNeeded,
   });
 
   @override
@@ -28,11 +28,11 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
   Color _getStatusColor(GrilleStatus status) {
     switch (status) {
       case GrilleStatus.ok:
-        return Colors.green.shade600;
+        return const Color(0xFF00E676);
       case GrilleStatus.warning:
-        return Colors.orange.shade700;
+        return const Color(0xFFFFD600);
       case GrilleStatus.urgent:
-        return Colors.red.shade700;
+        return const Color(0xFFFF1744);
     }
   }
 
@@ -64,8 +64,8 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
             backgroundColor: Colors.green,
           ),
         );
-        widget.onRefreshNeeded();
-        Navigator.of(context).pop(); // Back to dashboard to refresh
+        context.read<GrilleCubit>().loadGrilles();
+        Navigator.of(context).pop(); // Volver al dashboard
       }
     }
   }
@@ -77,8 +77,6 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Rejilla ${_grille.code}'),
-        backgroundColor: Colors.indigo,
-        foregroundColor: Colors.white,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
@@ -87,15 +85,11 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
           children: [
             // Status Banner
             Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
               child: Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
-                  color: statusColor.withOpacity(0.1),
+                  color: statusColor.withValues(alpha: 0.1),
                   border: Border.all(color: statusColor, width: 2),
                 ),
                 child: Row(
@@ -119,6 +113,7 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
                             style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
+                              color: Colors.white,
                             ),
                           ),
                           const SizedBox(height: 4),
@@ -142,12 +137,16 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
             // Header for Filter positions
             const Text(
               'Distribución Física de Filtros (4 Secciones)',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.cyanAccent,
+              ),
             ),
             const SizedBox(height: 8),
             const Text(
               'Toca cualquier filtro individual o usa el botón inferior para cambiar todos.',
-              style: TextStyle(color: Colors.grey, fontSize: 13),
+              style: TextStyle(color: Colors.white70, fontSize: 13),
             ),
             const SizedBox(height: 16),
 
@@ -196,16 +195,16 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
                                 child: Text(
                                   'Filtro #${filter.filterNumber}',
                                   style: const TextStyle(
-                                    color: Colors.white,
+                                    color: Colors.black,
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ),
-                              Icon(
+                              const Icon(
                                 Icons.touch_app,
                                 size: 16,
-                                color: Colors.grey.shade600,
+                                color: Colors.cyanAccent,
                               ),
                             ],
                           ),
@@ -216,6 +215,7 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 13,
+                              color: Colors.white,
                             ),
                           ),
                           const SizedBox(height: 4),
@@ -234,7 +234,7 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
                                 : 'Sin registro',
                             style: const TextStyle(
                               fontSize: 11,
-                              color: Colors.grey,
+                              color: Colors.white70,
                             ),
                           ),
                         ],
@@ -250,8 +250,8 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
             // Action Button
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.indigo,
-                foregroundColor: Colors.white,
+                backgroundColor: Colors.cyanAccent,
+                foregroundColor: Colors.black,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),

@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  api-filtros-panasa:
+    build: .
+    container_name: filtros_panasa_api
+    restart: always
+    ports:
+      - "3010:3010"
+    environment:
+      - PORT=3010
+      - NODE_ENV=production
+      - DB_PATH=/app/data/filtros_panasa.db
+      - CORS_ORIGIN=*
+      - ADMIN_PIN=1513
+      - LICENSE_SECRET_KEY=panasa-production-secret-key-2026
+    volumes:
+      - filtros_data:/app/data
+
+volumes:
+  filtros_data:

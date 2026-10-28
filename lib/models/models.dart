@@ -13,11 +13,16 @@ class Grille {
     required this.filters,
   });
 
+  /// Determina el bloque (MG-01, MG-02, MG-03) basado en la posición numérica fija (1-22) en SQLite
   String get blockCode {
-    int num = int.tryParse(code.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-    if (num <= 8) return 'MG-01';
-    if (num <= 14) return 'MG-02';
-    return 'MG-03';
+    int pos = position > 0
+        ? position
+        : (int.tryParse(code.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0);
+
+    if (pos >= 1 && pos <= 8) return 'MG-01';
+    if (pos >= 9 && pos <= 14) return 'MG-02';
+    if (pos >= 15 && pos <= 22) return 'MG-03';
+    return 'MG-01';
   }
 
   String get blockName {
@@ -33,11 +38,18 @@ class Grille {
     }
   }
 
+  /// Determina si la rejilla está en la fila superior o inferior basado en la posición (1-22)
   bool get isUpperRow {
-    int num = int.tryParse(code.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-    if (blockCode == 'MG-01') return num <= 4;
-    if (blockCode == 'MG-02') return num <= 11;
-    if (blockCode == 'MG-03') return num <= 18;
+    int pos = position > 0
+        ? position
+        : (int.tryParse(code.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0);
+
+    if (pos >= 1 && pos <= 4) return true; // MG-01 Superior
+    if (pos >= 5 && pos <= 8) return false; // MG-01 Inferior
+    if (pos >= 9 && pos <= 11) return true; // MG-02 Superior
+    if (pos >= 12 && pos <= 14) return false; // MG-02 Inferior
+    if (pos >= 15 && pos <= 18) return true; // MG-03 Superior
+    if (pos >= 19 && pos <= 22) return false; // MG-03 Inferior
     return true;
   }
 
@@ -144,6 +156,9 @@ class Employee {
     );
   }
 }
+
+/// Lista por defecto de empleados (vacía en instalaciones limpias hasta registrar personal)
+final List<Employee> defaultEmployees = [];
 
 class FilterEvent {
   final String eventId;

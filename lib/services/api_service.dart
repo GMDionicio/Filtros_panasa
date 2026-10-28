@@ -2,20 +2,258 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/models.dart';
+import 'local_db_service.dart';
 
 class ApiService {
-  static String baseUrl = 'http://10.0.2.2:3010';
-
-  static void updateBaseUrl(String newUrl) {
-    baseUrl = newUrl;
+  static String get defaultBaseUrl {
+    if (kIsWeb) {
+      if (Uri.base.host == 'localhost' || Uri.base.host == '127.0.0.1') {
+        return 'http://localhost:3010';
+      }
+    }
+    return 'https://panasa.gmnodo.com';
   }
 
-  // Health check
+  static String sanitizeUrl(String raw) {
+    String clean = raw.trim();
+    if (clean.isEmpty) return defaultBaseUrl;
+
+    // Remover barras diagonales finales para evitar URL con doble diagonal
+    while (clean.endsWith('/')) {
+      clean = clean.substring(0, clean.length - 1);
+    }
+
+    // Anteponer https:// si el usuario omitió el esquema (ej: panasa.gmnodo.com)
+    if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+      clean = 'https://$clean';
+    }
+
+    return clean;
+  }
+
+  static String baseUrl = defaultBaseUrl;
+  static bool _initialized = false;
+
+  /// Carga la URL del Servidor guardada
+  static Future<void> initBaseUrl() async {
+    if (_initialized) return;
+    final savedUrl = await LocalDbService.getSetting('base_url');
+    if (savedUrl != null && savedUrl.trim().isNotEmpty) {
+      baseUrl = sanitizeUrl(savedUrl);
+    } else {
+      baseUrl = defaultBaseUrl;
+    }
+    _initialized = true;
+  }
+
+  /// Actualiza y persiste la URL del servidor
+  static Future<void> updateBaseUrl(String newUrl) async {
+    baseUrl = sanitizeUrl(newUrl);
+    await LocalDbService.saveSetting('base_url', baseUrl);
+  }
+
+  /// Consulta el estado general del sistema (licencia activa, si existen operarios creados y si existen rejillas)
+  static Future<Map<String, dynamic>?> checkSystemStatus({required String deviceId}) async {
+    await initBaseUrl();
+
+    final localActivated = await LocalDbService.getSetting('is_activated');
+
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/api/system/status/$deviceId'))
+          .timeout(const Duration(seconds: 6));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final isServerActivated = data['isActivated'] == true;
+
+        if (isServerActivated) {
+          await LocalDbService.saveSetting('is_activated', 'true');
+        }
+
+        return {
+          ...data,
+          'isActivated': isServerActivated || localActivated == 'true',
+        };
+      }
+    } catch (e) {
+      debugPrint('Error verificando estado del sistema: $e');
+    }
+
+    if (localActivated == 'true') {
+      return {
+        'success': true,
+        'deviceId': deviceId,
+        'isActivated': true,
+        'hasEmployees': true,
+        'hasGrilles': true,
+      };
+    }
+
+    return null;
+  }
+
+  /// Activa el producto con Clave de Licencia y PIN de Administrador
+  static Future<Map<String, dynamic>?> activateProduct({
+    required String licenseKey,
+    required String adminPin,
+    required String deviceId,
+    String? deviceName,
+  }) async {
+    await initBaseUrl();
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/api/license/activate'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'licenseKey': licenseKey,
+              'adminPin': adminPin,
+              'deviceId': deviceId,
+              'deviceName': deviceName ?? (kIsWeb ? 'Navegador Web' : 'Dispositivo Android'),
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        await LocalDbService.saveSetting('is_activated', 'true');
+        return data;
+      }
+      return {'success': false, 'message': data['message'] ?? 'Error activando producto'};
+    } catch (e) {
+      debugPrint('Error al activar producto: $e');
+    }
+    return {'success': false, 'message': 'Error de conexión con el servidor de licencias'};
+  }
+
+  /// Ejecuta la configuración e inicialización de planta y primer operario
+  static Future<Map<String, dynamic>?> initialSetup({
+    required String adminPin,
+    required String employeeCode,
+    required String employeeName,
+  }) async {
+    await initBaseUrl();
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/api/system/setup'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'adminPin': adminPin,
+              'initialEmployeeCode': employeeCode,
+              'initialEmployeeName': employeeName,
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        await LocalDbService.saveSetting('is_activated', 'true');
+        return data;
+      }
+      return {'success': false, 'message': data['message'] ?? 'Error en configuración inicial'};
+    } catch (e) {
+      debugPrint('Error en la configuración inicial del sistema: $e');
+    }
+    return {'success': false, 'message': 'Error de conexión con el servidor'};
+  }
+
+  /// Autentica al operario en el servidor online y genera una sesión activa vinculada a este dispositivo
+  static Future<Map<String, dynamic>?> loginOperator({
+    required String payrollCode,
+    required String deviceId,
+    String? deviceName,
+  }) async {
+    await initBaseUrl();
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/api/operator/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'payrollCode': payrollCode,
+              'deviceId': deviceId,
+              'deviceName': deviceName ?? (kIsWeb ? 'Navegador Web' : 'App Android'),
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['authenticated'] == true) {
+          return data;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error autenticando operario en el servidor: $e');
+    }
+    return null;
+  }
+
+  /// Verifica si el dispositivo cuenta con una sesión activa en el servidor online
+  static Future<Map<String, dynamic>?> checkOperatorSession({required String deviceId}) async {
+    await initBaseUrl();
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/api/operator/session/$deviceId'))
+          .timeout(const Duration(seconds: 6));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['active'] == true) {
+          return data;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error verificando sesión de operario en servidor: $e');
+    }
+    return null;
+  }
+
+  /// Cierra la sesión activa en el servidor
+  static Future<void> logoutOperator({required String deviceId, String? token}) async {
+    await initBaseUrl();
+    try {
+      await http
+          .post(
+            Uri.parse('$baseUrl/api/operator/logout'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'deviceId': deviceId, 'token': token}),
+          )
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {}
+  }
+
+  /// Valida la clave de usuario administrador (1513) desde el servidor online
+  static Future<bool> validateAdminPin(String pin) async {
+    await initBaseUrl();
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/api/admin/validate-pin'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'pin': pin}),
+          )
+          .timeout(const Duration(seconds: 6));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['authorized'] == true;
+      }
+    } catch (e) {
+      debugPrint('Error al validar PIN de administrador en servidor online: $e');
+    }
+    return false;
+  }
+
+  // Health check con el servidor online
   static Future<bool> checkHealth() async {
+    await initBaseUrl();
     try {
       final response = await http
           .get(Uri.parse('$baseUrl/health'))
-          .timeout(const Duration(seconds: 2));
+          .timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return data['status'] == 'ok';
@@ -24,105 +262,186 @@ class ApiService {
     return false;
   }
 
-  // Seed DB with initial 22 grilles and 88 filters
+  // Resiembra la base de datos central y reinicia la base local
   static Future<bool> seedDatabase() async {
+    await initBaseUrl();
+
+    // 1. Limpiar base de datos local y caché (SQLite / SharedPreferences)
+    await LocalDbService.clearLocalGrillesAndEvents();
+
+    // 2. Establecer localmente el catálogo limpio (22 rejillas, 88 filtros en estado urgente/rojo)
+    final cleanMock = _generateMockGrilles();
+    await LocalDbService.saveGrilles(cleanMock);
+
+    // 3. Ejecutar seed en servidor backend para purgar eventos remotos
     try {
       final response = await http
-          .post(Uri.parse('$baseUrl/api/seed'))
-          .timeout(const Duration(seconds: 3));
-      return response.statusCode == 200;
-    } catch (_) {
-      return false;
+          .post(
+            Uri.parse('$baseUrl/api/seed'),
+            headers: {'Content-Type': 'application/json'},
+          )
+          .timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        await getGrilles();
+      }
+    } catch (e) {
+      debugPrint('Error ejecutando seed en servidor: $e');
+    }
+
+    return true;
+  }
+
+  // Batch Sync (Solo aplica para Android/Móvil)
+  static Future<void> syncPendingEvents() async {
+    if (kIsWeb) return; // En Web los datos se leen/escriben directamente en el servidor
+    await initBaseUrl();
+    final pending = await LocalDbService.getPendingEvents();
+    if (pending.isEmpty) return;
+
+    for (var item in pending) {
+      try {
+        final body = jsonEncode({
+          'eventId': item['event_id'],
+          'grilleCode': item['grille_code'],
+          'filterNumber': item['filter_number'],
+          'payrollCode': item['payroll_code'],
+          'occurredAt': item['occurred_at'],
+          'deviceInstallationId': 'EMULATOR-001',
+          'notes': item['notes'],
+        });
+
+        final response = await http
+            .post(
+              Uri.parse('$baseUrl/api/events'),
+              headers: {'Content-Type': 'application/json'},
+              body: body,
+            )
+            .timeout(const Duration(seconds: 8));
+
+        if (response.statusCode == 200) {
+          await LocalDbService.deletePendingEvent(item['id']);
+          debugPrint('Synced offline event ${item['id']} to backend.');
+        }
+      } catch (e) {
+        debugPrint('Failed to sync offline event ${item['id']}: $e');
+      }
     }
   }
 
-  // Get all Grilles + Filters + Last Events
+  // Obtener Rejillas + Filtros + Últimos Eventos
+  // En Web: Lee DIRECTAMENTE del servidor online
+  // En Android: Usa estrategia Local-First con SQLite
   static Future<List<Grille>> getGrilles() async {
+    await initBaseUrl();
     try {
       final response = await http
           .get(Uri.parse('$baseUrl/api/grilles'))
-          .timeout(const Duration(seconds: 2));
-      if (response.statusCode != 200) return _generateMockGrilles();
+          .timeout(const Duration(seconds: 8));
 
-      final data = jsonDecode(response.body);
-      final List rawGrilles = data['grilles'] ?? [];
+      if (response.statusCode == 200) {
+        if (!kIsWeb) {
+          await syncPendingEvents();
+        }
 
-      Map<String, FilterEvent> latestEvents = {};
-      try {
-        final eventsResponse = await http
-            .get(Uri.parse('$baseUrl/api/events'))
-            .timeout(const Duration(seconds: 2));
-        if (eventsResponse.statusCode == 200) {
-          final eventsData = jsonDecode(eventsResponse.body);
-          final List rawEvents = eventsData['events'] ?? [];
-          for (var e in rawEvents) {
-            final event = FilterEvent.fromJson(e);
-            final key = '${event.grilleCode}_${event.filterNumber}';
-            if (!latestEvents.containsKey(key) ||
-                event.occurredAt.isAfter(latestEvents[key]!.occurredAt)) {
-              latestEvents[key] = event;
+        final data = jsonDecode(response.body);
+        final List rawGrilles = data['grilles'] ?? [];
+
+        Map<String, FilterEvent> latestEvents = {};
+        try {
+          final eventsResponse = await http
+              .get(Uri.parse('$baseUrl/api/events'))
+              .timeout(const Duration(seconds: 8));
+          if (eventsResponse.statusCode == 200) {
+            final eventsData = jsonDecode(eventsResponse.body);
+            final List rawEvents = eventsData['events'] ?? [];
+            for (var e in rawEvents) {
+              final event = FilterEvent.fromJson(e);
+              final key = '${event.grilleCode}_${event.filterNumber}';
+              if (!latestEvents.containsKey(key) ||
+                  event.occurredAt.isAfter(latestEvents[key]!.occurredAt)) {
+                latestEvents[key] = event;
+              }
             }
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
 
-      List<Grille> grilles = [];
-      final positions = [
-        '1-arriba-izquierda',
-        '2-arriba-derecha',
-        '3-abajo-derecha',
-        '4-abajo-izquierda'
-      ];
+        List<Grille> grilles = [];
+        final positions = [
+          '1-arriba-izquierda',
+          '2-arriba-derecha',
+          '3-abajo-derecha',
+          '4-abajo-izquierda'
+        ];
 
-      for (var g in rawGrilles) {
-        final code = g['grille_code'] ?? '';
-        List<FilterItem> filterItems = [];
+        for (var g in rawGrilles) {
+          final code = g['grille_code'] ?? '';
+          List<FilterItem> filterItems = [];
 
-        for (int j = 1; j <= 4; j++) {
-          final key = '${code}_$j';
-          final lastEv = latestEvents[key];
-          filterItems.add(FilterItem(
-            id: key,
-            grilleCode: code,
-            filterNumber: j,
-            positionLabel: positions[j - 1],
-            lastReplacedAt: lastEv?.occurredAt,
-            lastEmployeeCode: lastEv?.payrollCode,
+          for (int j = 1; j <= 4; j++) {
+            final key = '${code}_$j';
+            final lastEv = latestEvents[key];
+            filterItems.add(FilterItem(
+              id: key,
+              grilleCode: code,
+              filterNumber: j,
+              positionLabel: positions[j - 1],
+              lastReplacedAt: lastEv?.occurredAt,
+              lastEmployeeCode: lastEv?.payrollCode,
+            ));
+          }
+
+          grilles.add(Grille(
+            code: code,
+            name: g['name'] ?? 'Rejilla $code',
+            position: g['position'] ?? 0,
+            filters: filterItems,
           ));
         }
 
-        grilles.add(Grille(
-          code: code,
-          name: g['name'] ?? 'Rejilla $code',
-          position: g['position'] ?? 0,
-          filters: filterItems,
-        ));
+        if (grilles.isNotEmpty) {
+          await LocalDbService.saveGrilles(grilles);
+          return grilles;
+        }
       }
-
-      return grilles.isNotEmpty ? grilles : _generateMockGrilles();
     } catch (e) {
-      debugPrint('Error loading grilles from API: $e');
-      return _generateMockGrilles();
+      debugPrint('Error de comunicación con servidor online: $e');
     }
+
+    // Si está en Web y falló la conexión con el servidor online, cargar caché web
+    final cached = await LocalDbService.loadCachedGrilles();
+    if (cached.isNotEmpty) {
+      return cached;
+    }
+
+    final mock = _generateMockGrilles();
+    await LocalDbService.saveGrilles(mock);
+    return mock;
   }
 
-  // Register a filter replacement event
+  // Registrar Reemplazo de Filtro
+  // En Web: Envía DIRECTAMENTE al servidor online
+  // En Android: Escritura Local SQLite + envío diferido
   static Future<bool> registerEvent({
     required String grilleCode,
     required int filterNumber,
     required String payrollCode,
     String? notes,
   }) async {
+    await initBaseUrl();
+    final now = DateTime.now();
+
+    // 1. Envío directo al Servidor Online
     try {
-      final eventId = 'EVT-${DateTime.now().millisecondsSinceEpoch}-$filterNumber';
+      final eventId = 'EVT-${now.millisecondsSinceEpoch}-$filterNumber';
       final body = jsonEncode({
         'eventId': eventId,
         'grilleCode': grilleCode,
         'filterNumber': filterNumber,
         'payrollCode': payrollCode,
-        'occurredAt': DateTime.now().toIso8601String(),
-        'deviceInstallationId': 'EMULATOR-001',
-        'notes': notes ?? 'Mantenimiento registrado desde App Flutter',
+        'occurredAt': now.toIso8601String(),
+        'deviceInstallationId': kIsWeb ? 'WEB-BROWSER' : 'ANDROID-APP',
+        'notes': notes ?? (kIsWeb ? 'Mantenimiento registrado desde Web' : 'Mantenimiento registrado desde App Android'),
       });
 
       final response = await http
@@ -131,39 +450,66 @@ class ApiService {
             headers: {'Content-Type': 'application/json'},
             body: body,
           )
-          .timeout(const Duration(seconds: 3));
+          .timeout(const Duration(seconds: 8));
 
-      return response.statusCode == 200;
+      if (response.statusCode == 200) {
+        await LocalDbService.updateLocalFilterReplacement(
+          grilleCode: grilleCode,
+          filterNumber: filterNumber,
+          payrollCode: payrollCode,
+          replacedAt: now,
+        );
+        return true;
+      }
     } catch (e) {
-      debugPrint('Error registering event: $e');
-      return false;
+      debugPrint('Error enviando evento al servidor online: $e');
     }
+
+    // Si estamos en móvil, encolar offline
+    if (!kIsWeb) {
+      await LocalDbService.updateLocalFilterReplacement(
+        grilleCode: grilleCode,
+        filterNumber: filterNumber,
+        payrollCode: payrollCode,
+        replacedAt: now,
+      );
+      await LocalDbService.savePendingEvent(
+        grilleCode: grilleCode,
+        filterNumber: filterNumber,
+        payrollCode: payrollCode,
+        occurredAt: now,
+        notes: notes,
+      );
+      return true;
+    }
+
+    return false;
   }
 
-  // Get Employees list
+  // Obtener Empleados directamente del servidor online
   static Future<List<Employee>> getEmployees() async {
+    await initBaseUrl();
     try {
       final response = await http
           .get(Uri.parse('$baseUrl/api/employees'))
-          .timeout(const Duration(seconds: 2));
+          .timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final List list = data['employees'] ?? [];
         if (list.isNotEmpty) {
-          return list.map((e) => Employee.fromJson(e)).toList();
+          final employees = list.map((e) => Employee.fromJson(e)).toList();
+          await LocalDbService.saveEmployees(employees);
+          return employees;
         }
       }
     } catch (_) {}
-    return [
-      Employee(payrollCode: 'EMP-001', name: 'Juan Pérez'),
-      Employee(payrollCode: 'EMP-002', name: 'Carlos López'),
-      Employee(payrollCode: 'EMP-003', name: 'María Gómez'),
-      Employee(payrollCode: 'EMP-004', name: 'Dionicio Gómez'),
-    ];
+
+    return await LocalDbService.loadEmployees();
   }
 
-  // Add Employee
+  // Agregar Empleado directamente en el servidor online
   static Future<bool> addEmployee(String payrollCode, String name) async {
+    await initBaseUrl();
     try {
       final response = await http
           .post(
@@ -171,32 +517,113 @@ class ApiService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'payrollCode': payrollCode, 'name': name}),
           )
-          .timeout(const Duration(seconds: 3));
-      return response.statusCode == 200;
-    } catch (_) {
-      return false;
+          .timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final newEmp = Employee(payrollCode: payrollCode, name: name);
+        final current = await LocalDbService.loadEmployees();
+        current.add(newEmp);
+        await LocalDbService.saveEmployees(current);
+        return true;
+      }
+    } catch (_) {}
+
+    if (!kIsWeb) {
+      final newEmp = Employee(payrollCode: payrollCode, name: name);
+      final current = await LocalDbService.loadEmployees();
+      current.add(newEmp);
+      await LocalDbService.saveEmployees(current);
+      return true;
     }
+
+    return false;
   }
 
-  // Fallback mock grilles if offline
+  // Eliminar Empleado/Operario directamente en el servidor online y localmente
+  static Future<bool> deleteEmployee(String payrollCode) async {
+    await initBaseUrl();
+    final cleanCode = payrollCode.trim();
+    try {
+      final response = await http
+          .delete(
+            Uri.parse('$baseUrl/api/employees/${Uri.encodeComponent(cleanCode)}'),
+          )
+          .timeout(const Duration(seconds: 6));
+
+      if (response.statusCode == 200) {
+        await LocalDbService.deleteEmployee(cleanCode);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Error eliminando empleado en servidor: $e');
+    }
+
+    if (!kIsWeb) {
+      await LocalDbService.deleteEmployee(cleanCode);
+      return true;
+    }
+
+    return false;
+  }
+
+  /// Restauración desde Servidor Online
+  static Future<bool> restoreDataFromBackend({String? deviceId, String? licenseKey}) async {
+    await initBaseUrl();
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/api/sync/restore'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'deviceId': deviceId ?? (kIsWeb ? 'WEB-BROWSER' : 'EMULATOR-001'),
+              'licenseKey': licenseKey ?? 'PAN-PRODUCTION-2026',
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        if (body['success'] == true && body['data'] != null) {
+          final data = body['data'];
+          if (data['employees'] != null) {
+            final List empList = data['employees'];
+            final employees = empList.map((e) => Employee.fromJson(e)).toList();
+            await LocalDbService.saveEmployees(employees);
+          }
+          await getGrilles();
+          return true;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error restaurando datos desde el servidor: $e');
+    }
+    return false;
+  }
+
+  // Generador de datos de catálogo inicial limpio (22 rejillas y 88 filtros)
   static List<Grille> _generateMockGrilles() {
     List<Grille> list = [];
-    final now = DateTime.now();
+    final positions = [
+      '1-arriba-izquierda',
+      '2-arriba-derecha',
+      '3-abajo-derecha',
+      '4-abajo-izquierda'
+    ];
+
     for (int i = 1; i <= 22; i++) {
       final code = 'R${i.toString().padLeft(2, '0')}';
-      int daysAgo = (i * 3) % 25;
-      final date = now.subtract(Duration(days: daysAgo));
-
       list.add(Grille(
         code: code,
         name: 'Rejilla $code',
         position: i,
-        filters: [
-          FilterItem(id: '${code}_1', grilleCode: code, filterNumber: 1, positionLabel: '1-arriba-izquierda', lastReplacedAt: date, lastEmployeeCode: 'EMP-001'),
-          FilterItem(id: '${code}_2', grilleCode: code, filterNumber: 2, positionLabel: '2-arriba-derecha', lastReplacedAt: date.subtract(const Duration(days: 2)), lastEmployeeCode: 'EMP-002'),
-          FilterItem(id: '${code}_3', grilleCode: code, filterNumber: 3, positionLabel: '3-abajo-derecha', lastReplacedAt: date, lastEmployeeCode: 'EMP-001'),
-          FilterItem(id: '${code}_4', grilleCode: code, filterNumber: 4, positionLabel: '4-abajo-izquierda', lastReplacedAt: date, lastEmployeeCode: 'EMP-003'),
-        ],
+        filters: List.generate(4, (j) => FilterItem(
+          id: '${code}_${j + 1}',
+          grilleCode: code,
+          filterNumber: j + 1,
+          positionLabel: positions[j],
+          lastReplacedAt: null,
+          lastEmployeeCode: null,
+        )),
       ));
     }
     return list;

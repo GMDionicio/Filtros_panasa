@@ -1,10 +1,15 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../blocs/grille_cubit.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
-import '../interfaz.dart';
+import '../services/local_db_service.dart';
+import '../widgets/app_drawer.dart';
+import '../widgets/initial_setup_dialog.dart';
+import '../widgets/operator_login_dialog.dart';
+import '../widgets/product_activation_dialog.dart';
 import 'grille_detail_screen.dart';
-import 'employees_screen.dart';
-import 'settings_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -14,30 +19,90 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  List<Grille> _allGrilles = [];
-  bool _isLoading = true;
-  bool _isConnected = false;
   String _searchQuery = '';
   GrilleStatus? _selectedStatusFilter;
+  Timer? _debounceTimer;
+  Map<String, String>? _activeOperator;
+
+  // Cache para memoización de filtrado de rejillas
+  List<Grille>? _lastInput;
+  String? _lastQuery;
+  GrilleStatus? _lastFilter;
+  List<Grille> _cachedFilteredList = [];
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkOperatorLogin();
+    });
   }
 
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
-    final isHealthOk = await ApiService.checkHealth();
-    final grilles = await ApiService.getGrilles();
+  Future<void> _checkOperatorLogin() async {
+    const deviceId = 'WEB-DEVICE-001';
 
-    if (mounted) {
-      setState(() {
-        _isConnected = isHealthOk;
-        _allGrilles = grilles;
-        _isLoading = false;
-      });
+    // 1. Consultar estado general del sistema
+    final status = await ApiService.checkSystemStatus(deviceId: deviceId);
+    if (!mounted) return;
+
+    // 2. Si el producto NO está activado, exigir activación por Licencia + PIN Admin
+    bool isActivated = status?['isActivated'] == true;
+    while (!isActivated && mounted) {
+      isActivated = await ProductActivationDialog.show(context, deviceId: deviceId);
     }
+    if (!mounted) return;
+
+    // 3. Si no existen operarios creados en el sistema, ejecutar Onboarding / Configuración Inicial
+    bool hasEmployees = status?['hasEmployees'] == true;
+    if (!hasEmployees && mounted) {
+      final setupResult = await InitialSetupDialog.show(context);
+      if (setupResult != null && mounted) {
+        setState(() => _activeOperator = setupResult);
+        context.read<GrilleCubit>().loadGrilles();
+        return;
+      }
+    }
+    if (!mounted) return;
+
+    // 4. Verificar si existe sesión de operario activa en servidor online
+    final onlineSession = await ApiService.checkOperatorSession(deviceId: deviceId);
+    if (onlineSession != null && onlineSession['active'] == true && mounted) {
+      final code = onlineSession['payrollCode'] as String;
+      final name = onlineSession['name'] as String;
+      await LocalDbService.saveActiveOperator(code, name);
+      setState(() => _activeOperator = {'code': code, 'name': name});
+      return;
+    }
+
+    // 5. Verificar sesión guardada localmente o pedir Login de Operario
+    final active = await LocalDbService.getActiveOperator();
+    if (mounted) {
+      if (active != null) {
+        setState(() => _activeOperator = active);
+      } else {
+        Map<String, String>? result;
+        while (result == null && mounted) {
+          result = await OperatorLoginDialog.show(context, canDismiss: false);
+        }
+        if (result != null && mounted) {
+          setState(() => _activeOperator = result);
+        }
+      }
+    }
+  }
+
+  Future<void> _openOperatorLogin() async {
+    final canDismiss = _activeOperator != null;
+    final result = await OperatorLoginDialog.show(context, canDismiss: canDismiss);
+    if (result != null && mounted) {
+      setState(() => _activeOperator = result);
+    }
+  }
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    super.dispose();
   }
 
   Color _getStatusColor(GrilleStatus status) {
@@ -51,14 +116,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  int get _countOk =>
-      _allGrilles.where((g) => g.status == GrilleStatus.ok).length;
-  int get _countWarning =>
-      _allGrilles.where((g) => g.status == GrilleStatus.warning).length;
-  int get _countUrgent =>
-      _allGrilles.where((g) => g.status == GrilleStatus.urgent).length;
-
   List<Grille> _filterList(List<Grille> input) {
+    if (identical(input, _lastInput) &&
+        _searchQuery == _lastQuery &&
+        _selectedStatusFilter == _lastFilter) {
+      return _cachedFilteredList;
+    }
+
+    _lastInput = input;
+    _lastQuery = _searchQuery;
+    _lastFilter = _selectedStatusFilter;
+
     List<Grille> list = List.from(input);
     if (_selectedStatusFilter != null) {
       list = list.where((g) => g.status == _selectedStatusFilter).toList();
@@ -71,7 +139,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               g.name.toLowerCase().contains(q))
           .toList();
     }
-    return list;
+
+    _cachedFilteredList = list;
+    return _cachedFilteredList;
   }
 
   @override
@@ -79,206 +149,193 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 
-    return DefaultTabController(
-      length: 4,
-      child: Scaffold(
-        backgroundColor: const Color(0xFF12161A),
-        appBar: AppBar(
-          title: const Text(
-            'Filtros Panasa — Elevación 2D',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-          backgroundColor: const Color(0xFF1B2228),
-          foregroundColor: Colors.white,
-          actions: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              margin: const EdgeInsets.only(right: 8),
-              decoration: BoxDecoration(
-                color: _isConnected
-                    ? Colors.green.shade800
-                    : Colors.orange.shade800,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _isConnected ? Icons.wifi : Icons.wifi_off,
-                    size: 14,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _isConnected ? 'API Local' : 'Offline',
-                    style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: _loadData,
-              tooltip: 'Actualizar',
-            ),
-          ],
-          bottom: const TabBar(
-            isScrollable: true,
-            indicatorColor: Colors.cyanAccent,
-            indicatorWeight: 3,
-            labelColor: Colors.cyanAccent,
-            unselectedLabelColor: Colors.white70,
-            labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-            tabs: [
-              Tab(text: '🏢 Vista Fachada Real'),
-              Tab(text: '◀️ MG-01 (Izquierdo)'),
-              Tab(text: '⏺️ MG-02 (Centro)'),
-              Tab(text: '▶️ MG-03 (Derecho)'),
-            ],
-          ),
-        ),
-        drawer: Drawer(
-          backgroundColor: const Color(0xFF12161A),
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              UserAccountsDrawerHeader(
-                decoration: const BoxDecoration(color: Color(0xFF1B2228)),
-                accountName: const Text('Filtros Panasa App',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                accountEmail: const Text('Gestión de Aire Acondicionado'),
-                currentAccountPicture: const CircleAvatar(
-                  backgroundColor: Colors.cyanAccent,
-                  child: Icon(Icons.air, size: 38, color: Colors.black),
-                ),
-              ),
-              ListTile(
-                leading:
-                    const Icon(Icons.threed_rotation, color: Colors.cyanAccent),
-                title: const Text('Gemelo Digital 3D (Modelo 3D)',
-                    style: TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const FachadaRejillas3DScreen()),
-                  );
-                },
-              ),
-              ListTile(
-                leading:
-                    const Icon(Icons.view_quilt, color: Colors.cyanAccent),
-                title: const Text('Elevación Fachada 2D (Por Bloques)',
-                    style: TextStyle(color: Colors.white)),
-                onTap: () => Navigator.pop(context),
-              ),
-              ListTile(
-                leading: const Icon(Icons.people, color: Colors.cyanAccent),
-                title: const Text('Gestión de Empleados / Nómina',
-                    style: TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const EmployeesScreen()),
-                  );
-                },
-              ),
-              const Divider(color: Colors.white24),
-              ListTile(
-                leading: const Icon(Icons.settings, color: Colors.cyanAccent),
-                title: const Text('Configuración & Servidor API',
-                    style: TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          SettingsScreen(onRefreshNeeded: _loadData),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-        body: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : Column(
-                children: [
-                  // Responsive Banner
-                  if (!isLandscape) ...[
-                    Container(
-                      color: const Color(0xFF1B2228),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              _buildSummaryCard('Al Día (<15d)', _countOk,
-                                  const Color(0xFF00E676), GrilleStatus.ok),
-                              const SizedBox(width: 8),
-                              _buildSummaryCard(
-                                  'Atención (≥15d)',
-                                  _countWarning,
-                                  const Color(0xFFFFD600),
-                                  GrilleStatus.warning),
-                              const SizedBox(width: 8),
-                              _buildSummaryCard(
-                                  'Urgente (≥20d)',
-                                  _countUrgent,
-                                  const Color(0xFFFF1744),
-                                  GrilleStatus.urgent),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          _buildSearchField(),
-                        ],
-                      ),
-                    ),
-                  ] else ...[
-                    // Ultra Compact Horizontal Banner in Landscape
-                    Container(
-                      color: const Color(0xFF1B2228),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 4),
-                      child: Row(
-                        children: [
-                          _buildMiniBadge(
-                              'Al Día (<15d)', _countOk, const Color(0xFF00E676)),
-                          const SizedBox(width: 6),
-                          _buildMiniBadge('Atención (≥15d)', _countWarning,
-                              const Color(0xFFFFD600)),
-                          const SizedBox(width: 6),
-                          _buildMiniBadge('Urgente (≥20d)', _countUrgent,
-                              const Color(0xFFFF1744)),
-                          const SizedBox(width: 12),
-                          Expanded(child: _buildSearchField()),
-                        ],
-                      ),
-                    ),
-                  ],
+    return BlocBuilder<GrilleCubit, GrilleState>(
+      builder: (context, state) {
+        final isLoading = state is GrilleLoading || state is GrilleInitial;
+        final allGrilles = state is GrilleLoaded ? state.grilles : <Grille>[];
+        final isConnected = state is GrilleLoaded ? state.isConnected : false;
+        final pendingCount = state is GrilleLoaded ? state.pendingCount : 0;
 
-                  // Tab Views
-                  Expanded(
-                    child: TabBarView(
+        final countOk =
+            allGrilles.where((g) => g.status == GrilleStatus.ok).length;
+        final countWarning =
+            allGrilles.where((g) => g.status == GrilleStatus.warning).length;
+        final countUrgent =
+            allGrilles.where((g) => g.status == GrilleStatus.urgent).length;
+
+        return DefaultTabController(
+          length: 4,
+          child: Scaffold(
+            backgroundColor: const Color(0xFF12161A),
+            appBar: AppBar(
+              title: const Text(
+                'Filtros Panasa — Elevación 2D',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              backgroundColor: const Color(0xFF1B2228),
+              foregroundColor: Colors.white,
+              actions: [
+                InkWell(
+                  onTap: _openOperatorLogin,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    margin: const EdgeInsets.only(right: 6),
+                    decoration: BoxDecoration(
+                      color: _activeOperator != null ? Colors.cyan.shade900 : Colors.blueGrey.shade900,
+                      border: Border.all(color: _activeOperator != null ? Colors.cyanAccent : Colors.white24),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
                       children: [
-                        _buildFacadeViewAll(),
-                        _buildSingleBlockView('MG-01'),
-                        _buildSingleBlockView('MG-02'),
-                        _buildSingleBlockView('MG-03'),
+                        const Icon(Icons.person, size: 14, color: Colors.cyanAccent),
+                        const SizedBox(width: 4),
+                        Text(
+                          _activeOperator != null ? _activeOperator!['code']! : 'Ingresar',
+                          style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
                       ],
                     ),
                   ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: isConnected
+                        ? (pendingCount > 0
+                            ? Colors.amber.shade900
+                            : Colors.green.shade800)
+                        : (pendingCount > 0
+                            ? Colors.orange.shade900
+                            : Colors.blueGrey.shade800),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        isConnected ? Icons.wifi : Icons.sd_storage,
+                        size: 14,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        isConnected
+                            ? (pendingCount > 0
+                                ? 'Sincronizando ($pendingCount)'
+                                : 'API Local')
+                            : (pendingCount > 0
+                                ? 'Modo Local ($pendingCount pend.)'
+                                : 'Modo Local'),
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: () => context.read<GrilleCubit>().loadGrilles(),
+                  tooltip: 'Actualizar',
+                ),
+              ],
+              bottom: const TabBar(
+                isScrollable: true,
+                indicatorColor: Colors.cyanAccent,
+                indicatorWeight: 3,
+                labelColor: Colors.cyanAccent,
+                unselectedLabelColor: Colors.white70,
+                labelStyle:
+                    TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                tabs: [
+                  Tab(text: '🏢 Vista Fachada Real'),
+                  Tab(text: '◀️ MG-01 (Izquierdo)'),
+                  Tab(text: '⏺️ MG-02 (Centro)'),
+                  Tab(text: '▶️ MG-03 (Derecho)'),
                 ],
               ),
-      ),
+            ),
+            drawer: const AppDrawer(currentRoute: '2d'),
+            body: isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : Column(
+                    children: [
+                      // Responsive Banner
+                      if (!isLandscape) ...[
+                        Container(
+                          color: const Color(0xFF1B2228),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  _buildSummaryCard(
+                                      'Al Día (<15d)',
+                                      countOk,
+                                      const Color(0xFF00E676),
+                                      GrilleStatus.ok),
+                                  const SizedBox(width: 8),
+                                  _buildSummaryCard(
+                                      'Atención (≥15d)',
+                                      countWarning,
+                                      const Color(0xFFFFD600),
+                                      GrilleStatus.warning),
+                                  const SizedBox(width: 8),
+                                  _buildSummaryCard(
+                                      'Urgente (≥20d)',
+                                      countUrgent,
+                                      const Color(0xFFFF1744),
+                                      GrilleStatus.urgent),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              _buildSearchField(),
+                            ],
+                          ),
+                        ),
+                      ] else ...[
+                        // Ultra Compact Horizontal Banner in Landscape
+                        Container(
+                          color: const Color(0xFF1B2228),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 4),
+                          child: Row(
+                            children: [
+                              _buildMiniBadge('Al Día (<15d)', countOk,
+                                  const Color(0xFF00E676)),
+                              const SizedBox(width: 6),
+                              _buildMiniBadge('Atención (≥15d)', countWarning,
+                                  const Color(0xFFFFD600)),
+                              const SizedBox(width: 6),
+                              _buildMiniBadge('Urgente (≥20d)', countUrgent,
+                                  const Color(0xFFFF1744)),
+                              const SizedBox(width: 12),
+                              Expanded(child: _buildSearchField()),
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      // Tab Views
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            _buildFacadeViewAll(allGrilles),
+                            _buildSingleBlockView('MG-01', allGrilles),
+                            _buildSingleBlockView('MG-02', allGrilles),
+                            _buildSingleBlockView('MG-03', allGrilles),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        );
+      },
     );
   }
 
@@ -299,7 +356,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               )
             : null,
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         filled: true,
         fillColor: Colors.black26,
         border: OutlineInputBorder(
@@ -312,7 +370,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
       onChanged: (val) {
-        setState(() => _searchQuery = val);
+        _debounceTimer?.cancel();
+        _debounceTimer = Timer(const Duration(milliseconds: 200), () {
+          if (mounted) {
+            setState(() => _searchQuery = val);
+          }
+        });
       },
     );
   }
@@ -343,22 +406,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // Full Facade View representing the 3 Blocks (MG-01, MG-02, MG-03)
-  Widget _buildFacadeViewAll() {
+  Widget _buildFacadeViewAll(List<Grille> allGrilles) {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
-        _buildBlockCard(
-            'MG-01', 'Bloque Izquierdo (MG-01)', 'R01 a R08 (8 Rejillas)'),
-        _buildBlockCard(
-            'MG-02', 'Bloque Centro (MG-02)', 'R09 a R14 (6 Rejillas)'),
-        _buildBlockCard(
-            'MG-03', 'Bloque Derecho (MG-03)', 'R15 a R22 (8 Rejillas)'),
+        _buildBlockCard('MG-01', 'Bloque Izquierdo (MG-01)',
+            'R01 a R08 (8 Rejillas)', allGrilles),
+        _buildBlockCard('MG-02', 'Bloque Centro (MG-02)',
+            'R09 a R14 (6 Rejillas)', allGrilles),
+        _buildBlockCard('MG-03', 'Bloque Derecho (MG-03)',
+            'R15 a R22 (8 Rejillas)', allGrilles),
       ],
     );
   }
 
   // Single Block View for tabs
-  Widget _buildSingleBlockView(String blockCode) {
+  Widget _buildSingleBlockView(String blockCode, List<Grille> allGrilles) {
     String title = blockCode == 'MG-01'
         ? 'Bloque Izquierdo (MG-01)'
         : blockCode == 'MG-02'
@@ -373,15 +436,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
-        _buildBlockCard(blockCode, title, subtitle),
+        _buildBlockCard(blockCode, title, subtitle, allGrilles),
       ],
     );
   }
 
   // Physical Facade Block Card with Upper and Lower Rows matching field photo
-  Widget _buildBlockCard(String blockCode, String title, String subtitle) {
-    final grillesInBlock = _filterList(
-        _allGrilles.where((g) => g.blockCode == blockCode).toList());
+  Widget _buildBlockCard(
+      String blockCode, String title, String subtitle, List<Grille> allGrilles) {
+    final grillesInBlock =
+        _filterList(allGrilles.where((g) => g.blockCode == blockCode).toList());
 
     if (grillesInBlock.isEmpty) {
       return Card(
@@ -398,6 +462,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     final upperRow = grillesInBlock.where((g) => g.isUpperRow).toList();
     final lowerRow = grillesInBlock.where((g) => !g.isUpperRow).toList();
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isCompact = screenWidth < 380;
+    final isWide = screenWidth >= 600;
+
+    double calcAspectRatio(int count) {
+      if (isWide) return 1.25;
+      if (isCompact) return count > 3 ? 0.85 : 0.92;
+      return count > 3 ? 0.90 : 1.0;
+    }
 
     return Card(
       elevation: 4,
@@ -466,7 +540,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: upperRow.length > 3 ? 4 : 3,
-                  childAspectRatio: 0.95,
+                  childAspectRatio: calcAspectRatio(upperRow.length),
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 8,
                 ),
@@ -502,7 +576,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: lowerRow.length > 3 ? 4 : 3,
-                  childAspectRatio: 0.95,
+                  childAspectRatio: calcAspectRatio(lowerRow.length),
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 8,
                 ),
@@ -530,14 +604,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
           MaterialPageRoute(
             builder: (_) => GrilleDetailScreen(
               grille: grille,
-              onRefreshNeeded: _loadData,
             ),
           ),
         );
       },
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
         decoration: BoxDecoration(
           color: const Color(0xFF232B32),
           borderRadius: BorderRadius.circular(8),
@@ -549,17 +622,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  grille.code,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: Colors.cyanAccent,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    grille.code,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: Colors.cyanAccent,
+                    ),
                   ),
                 ),
                 Container(
-                  width: 10,
-                  height: 10,
+                  width: 9,
+                  height: 9,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: statusColor,
@@ -575,21 +651,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
             const Spacer(),
-            Text(
-              '$maxDays d',
-              style: TextStyle(
-                color: statusColor,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '$maxDays d',
+                style: TextStyle(
+                  color: statusColor,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 3),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: grille.filters.map((f) {
                 return Container(
-                  width: 6,
-                  height: 6,
+                  width: 5.5,
+                  height: 5.5,
                   margin: const EdgeInsets.symmetric(horizontal: 1.5),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,

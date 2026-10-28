@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,7 +9,8 @@ import '../models/models.dart';
 abstract class LocalDataSource {
   Future<void> saveSetting(String key, String value);
   Future<String?> getSetting(String key);
-  Future<void> saveActiveOperator(String payrollCode, String name);
+  Future<String> getOrCreateDeviceId();
+  Future<void> saveActiveOperator(String payrollCode, String name, {String? token});
   Future<Map<String, String>?> getActiveOperator();
   Future<void> clearActiveOperator();
   Future<void> saveEmployees(List<Employee> employees);
@@ -165,17 +167,34 @@ class LocalDataSourceImpl implements LocalDataSource {
   }
 
   @override
-  Future<void> saveActiveOperator(String payrollCode, String name) async {
+  Future<String> getOrCreateDeviceId() async {
+    var id = await getSetting('device_id');
+    if (id == null || id.isEmpty) {
+      final rng = Random();
+      id = 'DEV-${DateTime.now().millisecondsSinceEpoch}-${rng.nextInt(0x7FFFFFFF).toRadixString(16)}';
+      await saveSetting('device_id', id);
+    }
+    return id;
+  }
+
+  @override
+  Future<void> saveActiveOperator(String payrollCode, String name, {String? token}) async {
     await saveSetting('active_operator_code', payrollCode);
     await saveSetting('active_operator_name', name);
+    await saveSetting('active_operator_token', token ?? '');
   }
 
   @override
   Future<Map<String, String>?> getActiveOperator() async {
     final code = await getSetting('active_operator_code');
     final name = await getSetting('active_operator_name');
+    final token = await getSetting('active_operator_token');
     if (code != null && code.isNotEmpty) {
-      return {'code': code, 'name': name ?? code};
+      return {
+        'code': code,
+        'name': name ?? code,
+        if (token != null && token.isNotEmpty) 'token': token,
+      };
     }
     return null;
   }
@@ -184,6 +203,7 @@ class LocalDataSourceImpl implements LocalDataSource {
   Future<void> clearActiveOperator() async {
     await saveSetting('active_operator_code', '');
     await saveSetting('active_operator_name', '');
+    await saveSetting('active_operator_token', '');
   }
 
   @override

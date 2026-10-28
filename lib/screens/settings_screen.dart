@@ -114,7 +114,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadLicenseInfo() async {
-    final status = await _authRepository.checkSystemStatus(deviceId: 'WEB-DEVICE-001');
+    final status = await _authRepository.checkSystemStatus(deviceId: await _authRepository.getOrCreateDeviceId());
     if (mounted && status != null) {
       setState(() {
         _isLicenseActive = status['isActivated'] == true;

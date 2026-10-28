@@ -12,8 +12,12 @@ class LocalDbService {
     return await getIt<LocalDataSource>().getSetting(key);
   }
 
-  static Future<void> saveActiveOperator(String payrollCode, String name) async {
-    await getIt<LocalDataSource>().saveActiveOperator(payrollCode, name);
+  static Future<String> getOrCreateDeviceId() async {
+    return await getIt<LocalDataSource>().getOrCreateDeviceId();
+  }
+
+  static Future<void> saveActiveOperator(String payrollCode, String name, {String? token}) async {
+    await getIt<LocalDataSource>().saveActiveOperator(payrollCode, name, token: token);
   }
 
   static Future<Map<String, String>?> getActiveOperator() async {

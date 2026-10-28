@@ -40,7 +40,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _checkOperatorLogin() async {
-    const deviceId = 'WEB-DEVICE-001';
+    final deviceId = await LocalDbService.getOrCreateDeviceId();
 
     // 1. Consultar estado general del sistema
     final status = await ApiService.checkSystemStatus(deviceId: deviceId);
@@ -65,17 +65,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
     if (!mounted) return;
 
-    // 4. Verificar si existe sesión de operario activa en servidor online
-    final onlineSession = await ApiService.checkOperatorSession(deviceId: deviceId);
-    if (onlineSession != null && onlineSession['active'] == true && mounted) {
-      final code = onlineSession['payrollCode'] as String;
-      final name = onlineSession['name'] as String;
-      await LocalDbService.saveActiveOperator(code, name);
-      setState(() => _activeOperator = {'code': code, 'name': name});
-      return;
-    }
-
-    // 5. Verificar sesión guardada localmente o pedir Login de Operario
+    // 4. Verificar sesión guardada localmente (permanente hasta borrar caché o cerrar sesión)
     final active = await LocalDbService.getActiveOperator();
     if (mounted) {
       if (active != null) {

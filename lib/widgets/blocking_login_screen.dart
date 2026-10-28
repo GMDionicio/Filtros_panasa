@@ -52,16 +52,17 @@ class _BlockingLoginScreenState extends State<BlockingLoginScreen> {
 
     try {
       // 1. Intentar login con backend remoto
+      final deviceId = await _authRepository.getOrCreateDeviceId();
       final authResult = await _authRepository.loginOperator(
         payrollCode: inputCode,
-        deviceId: 'WEB-DEVICE-001',
+        deviceId: deviceId,
       );
 
       if (authResult != null && authResult['authenticated'] == true) {
         final code = authResult['payrollCode'] as String? ?? inputCode;
         final name = authResult['name'] as String? ?? 'Operario $code';
 
-        await _authRepository.saveActiveOperator(code, name);
+        await _authRepository.saveActiveOperator(code, name, token: authResult['token'] as String?);
         if (mounted) {
           widget.onLoginSuccess({'code': code, 'name': name});
         }

@@ -23,9 +23,9 @@ const app = express();
 const PORT = process.env.PORT || 3010;
 const NODE_ENV = process.env.NODE_ENV || 'production';
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'filtros_panasa.db');
-const LICENSE_SECRET = process.env.LICENSE_SECRET_KEY || 'panasa-production-secret-key-2026';
-const ADMIN_PIN_PLAIN = process.env.ADMIN_PIN || '1513';
-const ADMIN_PIN_HASH = process.env.ADMIN_PIN_HASH || bcrypt.hashSync(ADMIN_PIN_PLAIN, 10);
+const LICENSE_SECRET = process.env.LICENSE_SECRET_KEY || '';
+const ADMIN_PIN_PLAIN = process.env.ADMIN_PIN || '';
+const ADMIN_PIN_HASH = process.env.ADMIN_PIN_HASH || null;
 
 // ==================== VALIDACIÓN DE ENTORNOS Y SEGURIDAD ====================
 
@@ -51,7 +51,8 @@ function validateEnvironment() {
     }
 
     if (pin === '1513' && !process.env.ADMIN_PIN_HASH) {
-      console.warn('⚠️ [ADVERTENCIA DE SEGURIDAD] Estás utilizando el PIN por defecto "1513" en Producción. Se recomienda cambiar ADMIN_PIN o definir ADMIN_PIN_HASH en .env.');
+      console.error('❌ [ERROR DE SEGURIDAD CRÍTICO] En Producción NO puedes usar el PIN por defecto "1513". Define ADMIN_PIN seguro o ADMIN_PIN_HASH en .env.');
+      process.exit(1);
     }
   }
 }
@@ -307,6 +308,7 @@ async function createTables() {
     `ALTER TABLE employees ADD COLUMN created_at_ts TEXT DEFAULT CURRENT_TIMESTAMP`,
     `ALTER TABLE operator_sessions ADD COLUMN active INTEGER DEFAULT 1`,
     `ALTER TABLE licenses ADD COLUMN status TEXT DEFAULT 'active'`,
+    `ALTER TABLE licenses ADD COLUMN created_at_ts TEXT DEFAULT CURRENT_TIMESTAMP`,
     `ALTER TABLE filter_events ADD COLUMN notes TEXT`,
   ];
   for (const m of migrations) {
@@ -473,13 +475,6 @@ async function requireAuth(req, res, next) {
       }
     }
 
-    // 3. Verificación de Licencia Global Activa en la base de datos (para dispositivos o clientes sincronizados)
-    const activeLicense = await dbQueryGet(`SELECT * FROM licenses WHERE status = 'active' ORDER BY created_at_ts DESC LIMIT 1`);
-    if (activeLicense) {
-      req.license = activeLicense;
-      return next();
-    }
-
     return res.status(401).json({
       success: false,
       error: 'Acceso no autorizado',
@@ -515,11 +510,8 @@ app.get('/api/system/status/:deviceId', async (req, res, next) => {
   try {
     const { deviceId } = req.params;
 
-    // 1. Verificar licencia
-    let licRow = await dbQueryGet(`SELECT * FROM licenses WHERE device_id = ? AND status = 'active'`, [deviceId]);
-    if (!licRow) {
-      licRow = await dbQueryGet(`SELECT * FROM licenses WHERE status = 'active' ORDER BY created_at_ts DESC LIMIT 1`);
-    }
+    // 1. Verificar licencia específica del dispositivo
+    const licRow = await dbQueryGet(`SELECT * FROM licenses WHERE device_id = ? AND status = 'active'`, [deviceId]);
     const isActivated = !!licRow;
 
     // 2. Verificar si existen empleados activos en la BD
@@ -672,12 +664,23 @@ app.post('/api/operator/login', async (req, res, next) => {
 app.get('/api/operator/session/:deviceId', async (req, res, next) => {
   try {
     const { deviceId } = req.params;
+
+    // Requiere token de sesión válido para evitar fuga de sesión a terceros
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ active: false, error: 'Se requiere token de sesión' });
+    }
+    const token = authHeader.substring(7).trim();
+    if (!token) {
+      return res.status(401).json({ active: false, error: 'Se requiere token de sesión' });
+    }
+
     const session = await dbQueryGet(
       `SELECT s.*, e.name FROM operator_sessions s
        JOIN employees e ON s.payroll_code = e.payroll_code
-       WHERE s.device_id = ? AND s.active = 1
+       WHERE s.device_id = ? AND s.token = ? AND s.active = 1
        ORDER BY s.logged_in_at_ts DESC LIMIT 1`,
-      [deviceId]
+      [deviceId, token]
     );
 
     if (!session) {
@@ -755,13 +758,14 @@ app.post('/api/license/activate', async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'Campos requeridos: licenseKey y deviceId' });
     }
 
-    // Validar PIN de administrador si se envía
-    if (adminPin) {
-      const pinStr = String(adminPin).trim();
-      const pinValid = ADMIN_PIN_HASH ? bcrypt.compareSync(pinStr, ADMIN_PIN_HASH) : (pinStr === ADMIN_PIN_PLAIN);
-      if (!pinValid) {
-        return res.status(401).json({ success: false, message: 'PIN de Administrador incorrecto' });
-      }
+    // Validar PIN de administrador (obligatorio para activar una licencia)
+    if (!adminPin) {
+      return res.status(400).json({ success: false, message: 'PIN de Administrador requerido para activar licencia' });
+    }
+    const pinStr = String(adminPin).trim();
+    const pinValid = ADMIN_PIN_HASH ? bcrypt.compareSync(pinStr, ADMIN_PIN_HASH) : (pinStr === ADMIN_PIN_PLAIN);
+    if (!pinValid) {
+      return res.status(401).json({ success: false, message: 'PIN de Administrador incorrecto' });
     }
 
     const cleanKey = String(licenseKey).trim().toUpperCase();
@@ -823,11 +827,7 @@ app.post('/api/license/activate', async (req, res, next) => {
 app.get('/api/license/status/:deviceId', async (req, res, next) => {
   try {
     const { deviceId } = req.params;
-    let row = await dbQueryGet(`SELECT * FROM licenses WHERE device_id = ?`, [deviceId]);
-
-    if (!row) {
-      row = await dbQueryGet(`SELECT * FROM licenses WHERE status = 'active' ORDER BY created_at_ts DESC LIMIT 1`);
-    }
+    const row = await dbQueryGet(`SELECT * FROM licenses WHERE device_id = ?`, [deviceId]);
 
     if (!row) {
       return res.json({ active: false, message: 'Dispositivo sin activación registrada' });
@@ -866,17 +866,9 @@ app.post('/api/sync/restore', async (req, res, next) => {
   try {
     const { deviceId, licenseKey } = req.body;
 
-    let validLicense = null;
-    if (deviceId) {
-      validLicense = await dbQueryGet(`SELECT * FROM licenses WHERE device_id = ? AND status = 'active'`, [deviceId]);
-    }
-
-    if (!validLicense && licenseKey) {
-      const cleanKey = String(licenseKey).trim().toUpperCase();
-      if (cleanKey.startsWith('PAN-')) {
-        validLicense = { status: 'active' };
-      }
-    }
+    const validLicense = deviceId
+      ? await dbQueryGet(`SELECT * FROM licenses WHERE device_id = ? AND status = 'active'`, [deviceId])
+      : null;
 
     if (!validLicense) {
       return res.status(403).json({
@@ -1147,9 +1139,19 @@ app.post('/api/sync/download', async (req, res, next) => {
   }
 });
 
-// Seed Manual y Reinicio de Estado de Rejillas
+// Seed Manual y Reinicio de Estado de Rejillas (requiere PIN de administrador)
 app.post('/api/seed', async (req, res, next) => {
   try {
+    const { adminPin } = req.body;
+    if (!adminPin) {
+      return res.status(400).json({ success: false, error: 'adminPin requerido' });
+    }
+    const pinStr = String(adminPin).trim();
+    const pinValid = ADMIN_PIN_HASH ? bcrypt.compareSync(pinStr, ADMIN_PIN_HASH) : (pinStr === ADMIN_PIN_PLAIN);
+    if (!pinValid) {
+      return res.status(401).json({ success: false, message: 'PIN de Administrador incorrecto' });
+    }
+
     await dbExecTransaction(async () => {
       await dbRun(`DELETE FROM filter_events`);
       await dbRun(`DELETE FROM sync_outbox`);

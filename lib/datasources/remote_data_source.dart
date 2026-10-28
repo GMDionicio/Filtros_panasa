@@ -103,13 +103,13 @@ class RemoteDataSourceImpl implements RemoteDataSource {
       headers['Authorization'] = 'Bearer ${activeOp['token']}';
     }
 
-    final deviceId = await localDataSource.getSetting('device_id') ??
-        (kIsWeb ? 'WEB-BROWSER' : 'EMULATOR-001');
+    final deviceId = await localDataSource.getOrCreateDeviceId();
     headers['X-Device-ID'] = deviceId;
 
-    final licenseKey = await localDataSource.getSetting('license_key') ??
-        'PAN-PRODUCTION-2026';
-    headers['X-License-Key'] = licenseKey;
+    final licenseKey = await localDataSource.getSetting('license_key');
+    if (licenseKey != null && licenseKey.isNotEmpty) {
+      headers['X-License-Key'] = licenseKey;
+    }
 
     return headers;
   }
@@ -491,8 +491,8 @@ class RemoteDataSourceImpl implements RemoteDataSource {
             Uri.parse('$_baseUrl/api/sync/restore'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({
-              'deviceId': deviceId ?? (kIsWeb ? 'WEB-BROWSER' : 'EMULATOR-001'),
-              'licenseKey': licenseKey ?? 'PAN-PRODUCTION-2026',
+              'deviceId': deviceId ?? await localDataSource.getOrCreateDeviceId(),
+              'licenseKey': licenseKey ?? '',
             }),
           )
           .timeout(const Duration(seconds: 12));

@@ -24,7 +24,8 @@ abstract class IAuthRepository {
   Future<bool> validateAdminPin(String pin);
   Future<bool> checkHealth();
   Future<Map<String, String>?> getActiveOperator();
-  Future<void> saveActiveOperator(String payrollCode, String name);
+  Future<String> getOrCreateDeviceId();
+  Future<void> saveActiveOperator(String payrollCode, String name, {String? token});
   Future<void> clearActiveOperator();
   Future<String?> getSetting(String key);
   Future<void> saveSetting(String key, String value);
@@ -147,8 +148,13 @@ class AuthRepositoryImpl implements IAuthRepository {
   }
 
   @override
-  Future<void> saveActiveOperator(String payrollCode, String name) async {
-    await localDataSource.saveActiveOperator(payrollCode, name);
+  Future<String> getOrCreateDeviceId() async {
+    return await localDataSource.getOrCreateDeviceId();
+  }
+
+  @override
+  Future<void> saveActiveOperator(String payrollCode, String name, {String? token}) async {
+    await localDataSource.saveActiveOperator(payrollCode, name, token: token);
   }
 
   @override

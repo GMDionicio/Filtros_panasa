@@ -1,18 +1,31 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
+import '../di/service_locator.dart';
+import '../repositories/auth_repository.dart';
 
 class ProductActivationDialog extends StatefulWidget {
   final String deviceId;
+  final IAuthRepository? authRepository;
 
-  const ProductActivationDialog({super.key, required this.deviceId});
+  const ProductActivationDialog({
+    super.key,
+    required this.deviceId,
+    this.authRepository,
+  });
 
-  static Future<bool> show(BuildContext context, {required String deviceId}) async {
+  static Future<bool> show(
+    BuildContext context, {
+    required String deviceId,
+    IAuthRepository? authRepository,
+  }) async {
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => PopScope(
         canPop: false,
-        child: ProductActivationDialog(deviceId: deviceId),
+        child: ProductActivationDialog(
+          deviceId: deviceId,
+          authRepository: authRepository,
+        ),
       ),
     );
     return result ?? false;
@@ -23,10 +36,18 @@ class ProductActivationDialog extends StatefulWidget {
 }
 
 class _ProductActivationDialogState extends State<ProductActivationDialog> {
+  late final IAuthRepository _authRepository;
+
   final _licenseController = TextEditingController();
   final _pinController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _authRepository = widget.authRepository ?? getIt<IAuthRepository>();
+  }
 
   @override
   void dispose() {
@@ -50,7 +71,7 @@ class _ProductActivationDialogState extends State<ProductActivationDialog> {
     });
 
     try {
-      final res = await ApiService.activateProduct(
+      final res = await _authRepository.activateProduct(
         licenseKey: licenseKey,
         adminPin: adminPin,
         deviceId: widget.deviceId,

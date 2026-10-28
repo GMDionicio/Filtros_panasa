@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'blocs/grille_cubit.dart';
+import 'di/service_locator.dart';
 import 'interfaz.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/employees_screen.dart';
+import 'services/sync_manager.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  setupServiceLocator();
+  getIt<SyncManager>().initConnectivityListener();
   runApp(const FiltrosPanasa3DApp());
 }
 
@@ -15,7 +20,7 @@ class FiltrosPanasa3DApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (context) => GrilleCubit()..loadGrilles(),
+      create: (context) => getIt<GrilleCubit>()..loadGrilles(),
       child: MaterialApp(
         title: 'Filtros Panasa — Gemelo Digital 3D',
         debugShowCheckedModeBanner: false,

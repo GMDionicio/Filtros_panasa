@@ -1,16 +1,24 @@
 import 'package:flutter/material.dart';
+import '../di/service_locator.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
-import '../services/local_db_service.dart';
+import '../repositories/auth_repository.dart';
+import '../repositories/employee_repository.dart';
+import '../repositories/grille_repository.dart';
 
 class MaintenanceDialog extends StatefulWidget {
   final Grille grille;
   final FilterItem? selectedFilter;
+  final IGrilleRepository? grilleRepository;
+  final IEmployeeRepository? employeeRepository;
+  final IAuthRepository? authRepository;
 
   const MaintenanceDialog({
     super.key,
     required this.grille,
     this.selectedFilter,
+    this.grilleRepository,
+    this.employeeRepository,
+    this.authRepository,
   });
 
   @override
@@ -18,6 +26,10 @@ class MaintenanceDialog extends StatefulWidget {
 }
 
 class _MaintenanceDialogState extends State<MaintenanceDialog> {
+  late final IGrilleRepository _grilleRepository;
+  late final IEmployeeRepository _employeeRepository;
+  late final IAuthRepository _authRepository;
+
   final List<Employee> _employees = List.from(defaultEmployees);
   late String _selectedPayrollCode;
   late List<int> _selectedFilterNumbers;
@@ -28,6 +40,10 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
   @override
   void initState() {
     super.initState();
+    _grilleRepository = widget.grilleRepository ?? getIt<IGrilleRepository>();
+    _employeeRepository = widget.employeeRepository ?? getIt<IEmployeeRepository>();
+    _authRepository = widget.authRepository ?? getIt<IAuthRepository>();
+
     _selectedPayrollCode = _employees.isNotEmpty ? _employees.first.payrollCode : 'EMP-001';
     _payrollController.text = _selectedPayrollCode;
 
@@ -40,8 +56,8 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
   }
 
   Future<void> _loadEmployees() async {
-    final activeOp = await LocalDbService.getActiveOperator();
-    final list = await ApiService.getEmployees();
+    final activeOp = await _authRepository.getActiveOperator();
+    final list = await _employeeRepository.getEmployees();
     if (mounted) {
       setState(() {
         if (list.isNotEmpty) {
@@ -75,7 +91,7 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
 
     bool successAll = true;
     for (int fNum in _selectedFilterNumbers) {
-      final res = await ApiService.registerEvent(
+      final res = await _grilleRepository.registerEvent(
         grilleCode: widget.grille.code,
         filterNumber: fNum,
         payrollCode: payrollCode,

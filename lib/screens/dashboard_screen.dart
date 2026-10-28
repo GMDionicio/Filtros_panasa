@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/local_db_service.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/blocking_login_screen.dart';
 import '../widgets/initial_setup_dialog.dart';
 import '../widgets/operator_login_dialog.dart';
 import '../widgets/product_activation_dialog.dart';
@@ -146,6 +147,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_activeOperator == null) {
+      return BlockingLoginScreen(
+        onLoginSuccess: (op) {
+          setState(() => _activeOperator = op);
+          context.read<GrilleCubit>().loadGrilles();
+        },
+      );
+    }
+
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
 

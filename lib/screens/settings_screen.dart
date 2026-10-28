@@ -1,17 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../blocs/grille_cubit.dart';
+import '../di/service_locator.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
+import '../repositories/auth_repository.dart';
+import '../repositories/employee_repository.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final IEmployeeRepository? employeeRepository;
+  final IAuthRepository? authRepository;
+
+  const SettingsScreen({
+    super.key,
+    this.employeeRepository,
+    this.authRepository,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  late final IEmployeeRepository _employeeRepository;
+  late final IAuthRepository _authRepository;
+
   final TextEditingController _urlController = TextEditingController();
   bool _isTesting = false;
   String _connectionStatus = '';
@@ -26,6 +38,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    _employeeRepository = widget.employeeRepository ?? getIt<IEmployeeRepository>();
+    _authRepository = widget.authRepository ?? getIt<IAuthRepository>();
+
     _loadSavedUrl();
     _loadLicenseInfo();
     _fetchEmployees();
@@ -33,7 +48,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _fetchEmployees() async {
     setState(() => _isLoadingEmployees = true);
-    final list = await ApiService.getEmployees();
+    final list = await _employeeRepository.getEmployees();
     if (mounted) {
       setState(() {
         _employees = list;
@@ -73,7 +88,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
 
     if (confirm == true) {
-      final ok = await ApiService.deleteEmployee(emp.payrollCode);
+      final ok = await _employeeRepository.deleteEmployee(emp.payrollCode);
       if (ok) {
         _fetchEmployees();
         if (mounted) {
@@ -89,17 +104,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSavedUrl() async {
-    await ApiService.initBaseUrl();
+    final url = await _authRepository.getBaseUrl();
     if (mounted) {
       setState(() {
-        _urlController.text = ApiService.baseUrl;
+        _urlController.text = url;
       });
       _testConnection();
     }
   }
 
   Future<void> _loadLicenseInfo() async {
-    final status = await ApiService.checkSystemStatus(deviceId: 'WEB-DEVICE-001');
+    final status = await _authRepository.checkSystemStatus(deviceId: 'WEB-DEVICE-001');
     if (mounted && status != null) {
       setState(() {
         _isLicenseActive = status['isActivated'] == true;
@@ -115,8 +130,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _connectionStatus = 'Verificando...';
     });
 
-    await ApiService.updateBaseUrl(_urlController.text.trim());
-    final isOk = await ApiService.checkHealth();
+    await _authRepository.updateBaseUrl(_urlController.text.trim());
+    final isOk = await _authRepository.checkHealth();
 
     setState(() {
       _isTesting = false;

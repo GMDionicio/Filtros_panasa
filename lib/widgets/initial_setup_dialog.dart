@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
-import '../services/local_db_service.dart';
+import '../di/service_locator.dart';
+import '../repositories/auth_repository.dart';
 
 class InitialSetupDialog extends StatefulWidget {
-  const InitialSetupDialog({super.key});
+  final IAuthRepository? authRepository;
 
-  static Future<Map<String, String>?> show(BuildContext context) async {
+  const InitialSetupDialog({super.key, this.authRepository});
+
+  static Future<Map<String, String>?> show(
+    BuildContext context, {
+    IAuthRepository? authRepository,
+  }) async {
     return showDialog<Map<String, String>>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => const PopScope(
+      builder: (ctx) => PopScope(
         canPop: false,
-        child: InitialSetupDialog(),
+        child: InitialSetupDialog(authRepository: authRepository),
       ),
     );
   }
@@ -21,12 +26,20 @@ class InitialSetupDialog extends StatefulWidget {
 }
 
 class _InitialSetupDialogState extends State<InitialSetupDialog> {
+  late final IAuthRepository _authRepository;
+
   final _pinController = TextEditingController();
   final _codeController = TextEditingController();
   final _nameController = TextEditingController();
 
   bool _isLoading = false;
   String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _authRepository = widget.authRepository ?? getIt<IAuthRepository>();
+  }
 
   @override
   void dispose() {
@@ -52,7 +65,7 @@ class _InitialSetupDialogState extends State<InitialSetupDialog> {
     });
 
     try {
-      final res = await ApiService.initialSetup(
+      final res = await _authRepository.initialSetup(
         adminPin: pin,
         employeeCode: code,
         employeeName: name,
@@ -62,8 +75,7 @@ class _InitialSetupDialogState extends State<InitialSetupDialog> {
         final empCode = res['payrollCode'] as String? ?? code;
         final empName = res['name'] as String? ?? name;
 
-        // Guardar sesión activa del primer operario
-        await LocalDbService.saveActiveOperator(empCode, empName);
+        await _authRepository.saveActiveOperator(empCode, empName);
 
         if (mounted) {
           Navigator.of(context).pop({

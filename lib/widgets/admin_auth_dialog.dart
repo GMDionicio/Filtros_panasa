@@ -1,18 +1,28 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
+import '../di/service_locator.dart';
+import '../repositories/auth_repository.dart';
 import '../screens/settings_screen.dart';
 
 class AdminAuthDialog extends StatefulWidget {
-  const AdminAuthDialog({super.key});
+  final IAuthRepository? authRepository;
+
+  const AdminAuthDialog({super.key, this.authRepository});
 
   @override
   State<AdminAuthDialog> createState() => _AdminAuthDialogState();
 }
 
 class _AdminAuthDialogState extends State<AdminAuthDialog> {
+  late final IAuthRepository _authRepository;
   final TextEditingController _pinController = TextEditingController();
   bool _isLoading = false;
   String _errorMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _authRepository = widget.authRepository ?? getIt<IAuthRepository>();
+  }
 
   Future<void> _validateAndNavigate() async {
     final pin = _pinController.text.trim();
@@ -26,14 +36,13 @@ class _AdminAuthDialogState extends State<AdminAuthDialog> {
       _errorMessage = '';
     });
 
-    // Validar remotamente en el servidor online
-    final isAuthorized = await ApiService.validateAdminPin(pin);
+    final isAuthorized = await _authRepository.validateAdminPin(pin);
 
     if (mounted) {
       setState(() => _isLoading = false);
 
       if (isAuthorized) {
-        Navigator.of(context).pop(); // Cerrar diálogo
+        Navigator.of(context).pop();
         Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const SettingsScreen()),

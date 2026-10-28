@@ -1,21 +1,38 @@
 import 'package:flutter/material.dart';
+import '../di/service_locator.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
-import '../services/local_db_service.dart';
+import '../repositories/auth_repository.dart';
+import '../repositories/employee_repository.dart';
 
 class OperatorLoginDialog extends StatefulWidget {
   final bool canDismiss;
+  final IAuthRepository? authRepository;
+  final IEmployeeRepository? employeeRepository;
 
-  const OperatorLoginDialog({super.key, this.canDismiss = false});
+  const OperatorLoginDialog({
+    super.key,
+    this.canDismiss = false,
+    this.authRepository,
+    this.employeeRepository,
+  });
 
   /// Muestra el diálogo de login y retorna datos del operario si inició sesión
-  static Future<Map<String, String>?> show(BuildContext context, {bool canDismiss = false}) async {
+  static Future<Map<String, String>?> show(
+    BuildContext context, {
+    bool canDismiss = false,
+    IAuthRepository? authRepository,
+    IEmployeeRepository? employeeRepository,
+  }) async {
     return showDialog<Map<String, String>>(
       context: context,
       barrierDismissible: canDismiss,
       builder: (ctx) => PopScope(
         canPop: canDismiss,
-        child: OperatorLoginDialog(canDismiss: canDismiss),
+        child: OperatorLoginDialog(
+          canDismiss: canDismiss,
+          authRepository: authRepository,
+          employeeRepository: employeeRepository,
+        ),
       ),
     );
   }
@@ -25,6 +42,9 @@ class OperatorLoginDialog extends StatefulWidget {
 }
 
 class _OperatorLoginDialogState extends State<OperatorLoginDialog> {
+  late final IAuthRepository _authRepository;
+  late final IEmployeeRepository _employeeRepository;
+
   final _codeController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
@@ -33,6 +53,8 @@ class _OperatorLoginDialogState extends State<OperatorLoginDialog> {
   @override
   void initState() {
     super.initState();
+    _authRepository = widget.authRepository ?? getIt<IAuthRepository>();
+    _employeeRepository = widget.employeeRepository ?? getIt<IEmployeeRepository>();
     _fetchEmployees();
   }
 
@@ -43,7 +65,7 @@ class _OperatorLoginDialogState extends State<OperatorLoginDialog> {
   }
 
   Future<void> _fetchEmployees() async {
-    final list = await ApiService.getEmployees();
+    final list = await _employeeRepository.getEmployees();
     if (mounted) {
       setState(() => _employees = list);
     }
@@ -62,8 +84,7 @@ class _OperatorLoginDialogState extends State<OperatorLoginDialog> {
     });
 
     try {
-      // 1. Intentar autenticación con el servidor backend
-      final authResult = await ApiService.loginOperator(
+      final authResult = await _authRepository.loginOperator(
         payrollCode: inputCode,
         deviceId: 'WEB-DEVICE-001',
       );
@@ -72,7 +93,7 @@ class _OperatorLoginDialogState extends State<OperatorLoginDialog> {
         final code = authResult['payrollCode'] as String? ?? inputCode;
         final name = authResult['name'] as String? ?? 'Operario $code';
 
-        await LocalDbService.saveActiveOperator(code, name);
+        await _authRepository.saveActiveOperator(code, name);
         if (mounted) {
           Navigator.of(context).pop({
             'code': code,
@@ -82,10 +103,9 @@ class _OperatorLoginDialogState extends State<OperatorLoginDialog> {
         return;
       }
 
-      // 2. Fallback local si el servidor no responde
       var empList = _employees;
       if (empList.isEmpty) {
-        empList = await ApiService.getEmployees();
+        empList = await _employeeRepository.getEmployees();
       }
 
       final matched = empList.firstWhere(
@@ -94,7 +114,7 @@ class _OperatorLoginDialogState extends State<OperatorLoginDialog> {
       );
 
       if (matched.payrollCode.isNotEmpty) {
-        await LocalDbService.saveActiveOperator(matched.payrollCode, matched.name);
+        await _authRepository.saveActiveOperator(matched.payrollCode, matched.name);
         if (mounted) {
           Navigator.of(context).pop({
             'code': matched.payrollCode,

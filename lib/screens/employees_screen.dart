@@ -1,17 +1,25 @@
 import 'package:flutter/material.dart';
+import '../di/service_locator.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
+import '../repositories/employee_repository.dart';
+import '../services/local_db_service.dart';
+import '../widgets/app_drawer.dart';
+import '../widgets/blocking_login_screen.dart';
 
 class EmployeesScreen extends StatefulWidget {
-  const EmployeesScreen({super.key});
+  final IEmployeeRepository? employeeRepository;
+
+  const EmployeesScreen({super.key, this.employeeRepository});
 
   @override
   State<EmployeesScreen> createState() => _EmployeesScreenState();
 }
 
 class _EmployeesScreenState extends State<EmployeesScreen> {
+  late final IEmployeeRepository _employeeRepository;
   List<Employee> _employees = [];
   bool _isLoading = true;
+  Map<String, String>? _activeOperator;
 
   final TextEditingController _codeController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
@@ -19,12 +27,21 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
   @override
   void initState() {
     super.initState();
+    _employeeRepository = widget.employeeRepository ?? getIt<IEmployeeRepository>();
+    _checkSession();
     _fetchEmployees();
+  }
+
+  Future<void> _checkSession() async {
+    final active = await LocalDbService.getActiveOperator();
+    if (mounted) {
+      setState(() => _activeOperator = active);
+    }
   }
 
   Future<void> _fetchEmployees() async {
     setState(() => _isLoading = true);
-    final list = await ApiService.getEmployees();
+    final list = await _employeeRepository.getEmployees();
     setState(() {
       _employees = list;
       _isLoading = false;
@@ -42,7 +59,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
       return;
     }
 
-    final success = await ApiService.addEmployee(code, name);
+    final success = await _employeeRepository.addEmployee(code, name);
     if (success) {
       _codeController.clear();
       _nameController.clear();
@@ -88,7 +105,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
     );
 
     if (confirmed == true) {
-      final success = await ApiService.deleteEmployee(payrollCode);
+      final success = await _employeeRepository.deleteEmployee(payrollCode);
       if (success) {
         _fetchEmployees();
         if (mounted) {
@@ -105,7 +122,17 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_activeOperator == null) {
+      return BlockingLoginScreen(
+        onLoginSuccess: (op) {
+          setState(() => _activeOperator = op);
+          _fetchEmployees();
+        },
+      );
+    }
+
     return Scaffold(
+      drawer: const AppDrawer(currentRoute: 'employees'),
       appBar: AppBar(
         title: const Text('Gestión de Operarios'),
         actions: [

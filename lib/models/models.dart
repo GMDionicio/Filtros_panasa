@@ -1,3 +1,5 @@
+import '../config/business_rules.dart';
+
 class Grille {
   final String code;
   final String name;
@@ -19,23 +21,11 @@ class Grille {
         ? position
         : (int.tryParse(code.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0);
 
-    if (pos >= 1 && pos <= 8) return 'MG-01';
-    if (pos >= 9 && pos <= 14) return 'MG-02';
-    if (pos >= 15 && pos <= 22) return 'MG-03';
-    return 'MG-01';
+    return BusinessRules.getBlockCode(pos);
   }
 
   String get blockName {
-    switch (blockCode) {
-      case 'MG-01':
-        return 'Bloque Izquierdo (MG-01)';
-      case 'MG-02':
-        return 'Bloque Centro (MG-02)';
-      case 'MG-03':
-        return 'Bloque Derecho (MG-03)';
-      default:
-        return blockCode;
-    }
+    return BusinessRules.getBlockName(blockCode);
   }
 
   /// Determina si la rejilla está en la fila superior o inferior basado en la posición (1-22)
@@ -44,13 +34,7 @@ class Grille {
         ? position
         : (int.tryParse(code.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0);
 
-    if (pos >= 1 && pos <= 4) return true; // MG-01 Superior
-    if (pos >= 5 && pos <= 8) return false; // MG-01 Inferior
-    if (pos >= 9 && pos <= 11) return true; // MG-02 Superior
-    if (pos >= 12 && pos <= 14) return false; // MG-02 Inferior
-    if (pos >= 15 && pos <= 18) return true; // MG-03 Superior
-    if (pos >= 19 && pos <= 22) return false; // MG-03 Inferior
-    return true;
+    return BusinessRules.isUpperRow(pos);
   }
 
   GrilleStatus get status {
@@ -60,9 +44,9 @@ class Grille {
 
     for (var filter in filters) {
       final days = filter.daysSinceReplacement;
-      if (days >= 20) {
+      if (days >= BusinessRules.urgentThresholdDays) {
         hasRed = true;
-      } else if (days >= 15) {
+      } else if (days >= BusinessRules.warningThresholdDays) {
         hasYellow = true;
       }
     }
@@ -115,16 +99,13 @@ class FilterItem {
   });
 
   int get daysSinceReplacement {
-    if (lastReplacedAt == null) return 30; // Default if never replaced
+    if (lastReplacedAt == null) return BusinessRules.defaultDaysIfNeverReplaced; // Default if never replaced
     final diff = DateTime.now().difference(lastReplacedAt!);
     return diff.inDays;
   }
 
   GrilleStatus get status {
-    final days = daysSinceReplacement;
-    if (days >= 20) return GrilleStatus.urgent;
-    if (days >= 15) return GrilleStatus.warning;
-    return GrilleStatus.ok;
+    return BusinessRules.calculateStatusFromDays(daysSinceReplacement);
   }
 
   factory FilterItem.fromJson(Map<String, dynamic> json) {

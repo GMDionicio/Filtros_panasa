@@ -113,6 +113,20 @@ class _AppDrawerState extends State<AppDrawer> {
               }
             },
           ),
+          if (_activeOperator != null) ...[
+            const Divider(color: Colors.white24),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.redAccent),
+              title: const Text('Cerrar Sesión de Operario', style: TextStyle(color: Colors.redAccent)),
+              onTap: () async {
+                Navigator.pop(context);
+                await LocalDbService.clearActiveOperator();
+                if (context.mounted) {
+                  Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+                }
+              },
+            ),
+          ],
         ],
       ),
     );

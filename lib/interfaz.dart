@@ -8,6 +8,7 @@ import 'screens/maintenance_dialog.dart';
 import 'services/api_service.dart';
 import 'services/local_db_service.dart';
 import 'widgets/app_drawer.dart';
+import 'widgets/blocking_login_screen.dart';
 import 'widgets/initial_setup_dialog.dart';
 import 'widgets/operator_login_dialog.dart';
 import 'widgets/product_activation_dialog.dart';
@@ -316,6 +317,15 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_activeOperator == null) {
+      return BlockingLoginScreen(
+        onLoginSuccess: (op) {
+          setState(() => _activeOperator = op);
+          context.read<GrilleCubit>().loadGrilles();
+        },
+      );
+    }
+
     return BlocConsumer<GrilleCubit, GrilleState>(
       listener: (context, state) {
         if (state is GrilleLoaded) {

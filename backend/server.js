@@ -1231,12 +1231,70 @@ app.post('/api/sync/outbox/process', async (req, res, next) => {
 app.post('/api/sync/download', async (req, res, next) => {
   try {
     const { since } = req.body;
-    const timestamp = since || new Date().toISOString();
+
+    // Cursor de la última descarga (fallback: hace 30 días para primer sync)
+    const cursorRow = await dbQueryGet(`SELECT value FROM sync_cursor WHERE key = 'last_download'`);
+    const lastDownload = cursorRow ? cursorRow.value : null;
+
+    // Determinar el punto de corte: más reciente entre since y last_download
+    let cutoff;
+    if (since && lastDownload) {
+      cutoff = new Date(since) > new Date(lastDownload) ? since : lastDownload;
+    } else {
+      cutoff = since || lastDownload || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    }
+
+    // Query incremental: eventos nuevos desde el cutoff
+    const eventsRows = await dbQueryAll(
+      `SELECT id, event_id, event_type, grille_code, filter_number, payroll_code,
+              occurred_at_ts, device_installation_id, server_received_at_ts, notes, synced
+       FROM filter_events
+       WHERE occurred_at_ts >= ?
+       ORDER BY occurred_at_ts ASC`,
+      [cutoff]
+    );
+
+    // Status de semáforos (reutiliza la misma lógica que GET /api/grilles/status)
+    const grillesWithStatus = await dbQueryAll(`
+      SELECT g.grille_code, g.name, g.position,
+             f.filter_number, f.position as position_label,
+             COALESCE(latest.max_occurred_at_ts, '1970-01-01T00:00:00.000Z') as last_replacement,
+             CASE
+               WHEN latest.max_occurred_at_ts IS NOT NULL
+                 THEN CAST((julianday('now') - julianday(latest.max_occurred_at_ts)) AS INTEGER)
+               ELSE 30
+             END as days_since_replacement,
+             CASE
+               WHEN latest.max_occurred_at_ts IS NOT NULL
+                 AND (julianday('now') - julianday(latest.max_occurred_at_ts)) >= 20 THEN 'urgent'
+               WHEN latest.max_occurred_at_ts IS NOT NULL
+                 AND (julianday('now') - julianday(latest.max_occurred_at_ts)) >= 15 THEN 'warning'
+               ELSE 'ok'
+             END as status
+      FROM filters f
+      JOIN grilles g ON f.grille_code = g.grille_code
+      LEFT JOIN (
+        SELECT grille_code, filter_number, MAX(occurred_at_ts) as max_occurred_at_ts
+        FROM filter_events
+        GROUP BY grille_code, filter_number
+      ) latest ON f.grille_code = latest.grille_code AND f.filter_number = latest.filter_number
+      ORDER BY g.position, f.filter_number
+    `);
+
+    // Actualizar cursor de descarga
     await dbRun(
       `INSERT OR REPLACE INTO sync_cursor (key, value, updated_at_ts) VALUES ('last_download', ?, CURRENT_TIMESTAMP)`,
-      [timestamp]
+      [new Date().toISOString()]
     );
-    res.json({ success: true, downloaded: 0, message: 'Sincronización completada' });
+
+    res.json({
+      success: true,
+      downloaded: eventsRows.length,
+      events: eventsRows,
+      grilles_status: grillesWithStatus,
+      cutoff_used: cutoff,
+      downloaded_at: new Date().toISOString(),
+    });
   } catch (err) {
     next(err);
   }

@@ -1032,6 +1032,74 @@ app.get('/api/filters/:grilleCode', async (req, res, next) => {
   }
 });
 
+// ==================== SEMÁFORO SERVER-SIDE (FP-SYNC-03) ====================
+// Calcula el estado de cada rejilla server-side para que web y Android pinten idéntico.
+// Retorna un array con grille_code, position, y status por cada filtro (ok/warning/urgent).
+// Umbrales: warning >= 15 días, urgent >= 20 días, default 30 si nunca reemplazado.
+app.get('/api/grilles/status', async (req, res, next) => {
+  try {
+    const now = new Date();
+    const warningMs = 15 * 24 * 60 * 60 * 1000; // 15 días
+    const urgentMs = 20 * 24 * 60 * 60 * 1000;   // 20 días
+    const defaultMs = 30 * 24 * 60 * 60 * 1000;  // 30 días si nunca reemplazado
+
+    // Obtener todos los filtros (catálogo estático)
+    const allFilters = await dbQueryAll(
+      `SELECT f.grille_code, f.filter_number, f.position, g.position as grille_position
+       FROM filters f
+       JOIN grilles g ON f.grille_code = g.grille_code
+       ORDER BY g.position, f.filter_number`
+    );
+
+    // Obtener el último evento de reemplazo por (grille_code, filter_number)
+    const latestEvents = await dbQueryAll(
+      `SELECT grille_code, filter_number, MAX(occurred_at_ts) as last_occurred
+       FROM filter_events
+       GROUP BY grille_code, filter_number`
+    );
+
+    // Construir mapa de último evento para lookup O(1)
+    const eventMap = {};
+    for (const ev of latestEvents) {
+      const key = `${ev.grille_code}_${ev.filter_number}`;
+      eventMap[key] = ev.last_occurred;
+    }
+
+    // Calcular status para cada filtro
+    const statuses = [];
+    for (const f of allFilters) {
+      const key = `${f.grille_code}_${f.filter_number}`;
+      let daysSince = defaultMs / (24 * 60 * 60 * 1000); // default 30 días
+
+      if (eventMap[key]) {
+        const lastOccurred = new Date(eventMap[key]);
+        const diffMs = now - lastOccurred;
+        daysSince = diffMs / (24 * 60 * 60 * 1000);
+      }
+
+      let status = 'ok';
+      if (daysSince >= 20) {
+        status = 'urgent';
+      } else if (daysSince >= 15) {
+        status = 'warning';
+      }
+
+      statuses.push({
+        grille_code: f.grille_code,
+        filter_number: f.filter_number,
+        position_label: f.position,
+        grille_position: f.grille_position,
+        days_since_replacement: Math.floor(daysSince),
+        status: status
+      });
+    }
+
+    res.json({ statuses, count: statuses.length, generated_at: now.toISOString() });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ==================== EVENTOS DE REEMPLAZO DE FILTROS ====================
 
 app.post('/api/events', async (req, res, next) => {
@@ -1219,7 +1287,7 @@ app.use((req, res) => {
 
 initDb().then(() => {
   validateEnvironment();
-  initOutboxWorker();
+  // initOutboxWorker() desactivado — FP-SYNC-01: edge M73 es SSOT, no hay servidor central
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`====================================================`);

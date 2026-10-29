@@ -144,25 +144,31 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
     final List<int> successfulFilters = [];
     final List<int> failedFilters = [];
 
-    for (int fNum in _selectedFilterNumbers) {
-      final res = await _grilleRepository.registerEvent(
-        grilleCode: widget.grille.code,
-        filterNumber: fNum,
-        payrollCode: inputPayrollCode,
-        notes: _notesController.text.trim().isEmpty
-            ? 'Mantenimiento registrado'
-            : _notesController.text.trim(),
-      );
-      if (res) {
-        successfulFilters.add(fNum);
-      } else {
-        failedFilters.add(fNum);
+    try {
+      for (int fNum in _selectedFilterNumbers) {
+        final res = await _grilleRepository.registerEvent(
+          grilleCode: widget.grille.code,
+          filterNumber: fNum,
+          payrollCode: inputPayrollCode,
+          notes: _notesController.text.trim().isEmpty
+              ? 'Mantenimiento registrado'
+              : _notesController.text.trim(),
+        );
+        if (res) {
+          successfulFilters.add(fNum);
+        } else {
+          failedFilters.add(fNum);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error registrando mantenimientos: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
       }
     }
 
     if (!mounted) return;
-
-    setState(() => _isLoading = false);
 
     final result = MaintenanceResult(
       successfulFilters: successfulFilters,
@@ -267,7 +273,7 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
                   spacing: 6,
                   runSpacing: 6,
                   children: _employees.map((emp) {
-                    final isSelected = emp.payrollCode == _selectedPayrollCode;
+                    final isSelected = emp.payrollCode.trim().toUpperCase() == _selectedPayrollCode.trim().toUpperCase();
                     return ChoiceChip(
                       label: Text(
                         '${emp.payrollCode} (${emp.name})',

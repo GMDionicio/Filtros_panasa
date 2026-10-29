@@ -24,7 +24,7 @@ const PORT = process.env.PORT || 3010;
 const NODE_ENV = process.env.NODE_ENV || 'production';
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'filtros_panasa.db');
 const LICENSE_SECRET = process.env.LICENSE_SECRET_KEY || '';
-const ADMIN_PIN_PLAIN = process.env.ADMIN_PIN || '';
+const ADMIN_PIN_PLAIN = (process.env.ADMIN_PIN || '').trim();
 const ADMIN_PIN_HASH = process.env.ADMIN_PIN_HASH || null;
 
 // ==================== VALIDACIÓN DE ENTORNOS Y SEGURIDAD ====================
@@ -130,6 +130,7 @@ app.use('/api/operator/login', strictLimiter);
 app.use('/api/license/activate', strictLimiter);
 app.use('/api/system/setup', strictLimiter);
 app.use('/api/system/reset', strictLimiter);
+app.use('/api/seed', strictLimiter);
 
 // Logger de solicitudes HTTP estructurado
 app.use((req, res, next) => {
@@ -473,16 +474,22 @@ async function requireAuth(req, res, next) {
     if (deviceId) {
       const lic = await dbQueryGet(`SELECT * FROM licenses WHERE device_id = ? AND status = 'active'`, [String(deviceId).trim()]);
       if (lic) {
-        req.license = lic;
-        return next();
+        const expTime = lic.expires_at_ts ? new Date(lic.expires_at_ts).getTime() : Infinity;
+        if (expTime > Date.now()) {
+          req.license = lic;
+          return next();
+        }
       }
     }
 
     if (licenseKey) {
       const lic = await dbQueryGet(`SELECT * FROM licenses WHERE license_key = ? AND status = 'active'`, [String(licenseKey).trim()]);
       if (lic) {
-        req.license = lic;
-        return next();
+        const expTime = lic.expires_at_ts ? new Date(lic.expires_at_ts).getTime() : Infinity;
+        if (expTime > Date.now()) {
+          req.license = lic;
+          return next();
+        }
       }
     }
 
@@ -523,7 +530,6 @@ app.get('/api/system/status/:deviceId', async (req, res, next) => {
 
     // 1. Verificar licencia específica del dispositivo
     const licRow = await dbQueryGet(`SELECT * FROM licenses WHERE device_id = ? AND status = 'active'`, [deviceId]);
-    const isActivated = !!licRow;
 
     // 2. Verificar si existen empleados activos en la BD
     const empCount = await dbQueryGet(`SELECT COUNT(*) as count FROM employees WHERE active = 1`);
@@ -533,16 +539,21 @@ app.get('/api/system/status/:deviceId', async (req, res, next) => {
     const grCount = await dbQueryGet(`SELECT COUNT(*) as count FROM grilles`);
     const hasGrilles = grCount && grCount.count > 0;
 
-    // 4. Calcular días restantes dinámicamente según expiración o fecha de activación
+    // 4. Calcular días restantes dinámicamente y verificar activación según expiración
+    let isActivated = false;
     let daysRemaining = 0;
-    if (isActivated && licRow) {
+    if (licRow) {
+      let expDate;
       if (licRow.expires_at_ts) {
-        const expDate = new Date(licRow.expires_at_ts);
-        const diffMs = expDate.getTime() - Date.now();
-        daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+        expDate = new Date(licRow.expires_at_ts);
       } else {
         const actDate = new Date(licRow.activated_at_ts || licRow.created_at_ts || Date.now());
-        const expDate = new Date(actDate.getTime() + 365 * 24 * 60 * 60 * 1000);
+        expDate = new Date(actDate.getTime() + 365 * 24 * 60 * 60 * 1000);
+      }
+      const diffMs = expDate.getTime() - Date.now();
+      daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+      isActivated = diffMs > 0;
+    }
         const diffMs = expDate.getTime() - Date.now();
         daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
       }

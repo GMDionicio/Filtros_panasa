@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import '../config/business_rules.dart';
 import '../datasources/local_data_source.dart';
 import '../datasources/remote_data_source.dart';
@@ -147,18 +146,16 @@ class GrilleRepositoryImpl implements IGrilleRepository {
       return true;
     }
 
-    if (!kIsWeb) {
-      await localDataSource.savePendingEvent(
-        grilleCode: grilleCode,
-        filterNumber: filterNumber,
-        payrollCode: payrollCode,
-        occurredAt: now,
-        notes: notes,
-      );
-      return true;
-    }
-
-    return false;
+    // Outbox persistente en web: SharedPreferences funciona en todos los targets.
+    // savePendingEvent ya maneja el fallback SQLite→SharedPreferences internamente.
+    await localDataSource.savePendingEvent(
+      grilleCode: grilleCode,
+      filterNumber: filterNumber,
+      payrollCode: payrollCode,
+      occurredAt: now,
+      notes: notes,
+    );
+    return true;
   }
 
   @override

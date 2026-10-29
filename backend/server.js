@@ -1063,7 +1063,7 @@ app.post('/api/events', async (req, res, next) => {
       await dbRun(
         `INSERT OR REPLACE INTO sync_outbox
          (id, event_id, payload, attempts, next_retry_at_ts, status, created_at_ts, updated_at_ts)
-         VALUES (?, ?, ?, 0, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+         VALUES (?, ?, ?, 0, ?, 'ack', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [uuidv4(), eventId, payload, nextRetry]
       );
 

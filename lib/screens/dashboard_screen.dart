@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../blocs/grille_cubit.dart';
+import '../di/service_locator.dart';
 import '../models/models.dart';
+import '../repositories/employee_repository.dart';
 import '../services/api_service.dart';
 import '../services/local_db_service.dart';
 import '../widgets/app_drawer.dart';
@@ -20,6 +22,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   GrilleStatus? _selectedStatusFilter;
   Timer? _debounceTimer;
@@ -42,19 +45,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _checkOperatorLogin() async {
     final deviceId = await LocalDbService.getOrCreateDeviceId();
 
-    // 1. Consultar estado general del sistema
+    // 1. Consultar estado general del sistema (remoto y local)
     final status = await ApiService.checkSystemStatus(deviceId: deviceId);
     if (!mounted) return;
 
-    // 2. Si el producto NO está activado, exigir activación por Licencia + PIN Admin
-    bool isActivated = status?['isActivated'] == true;
+    final localEmps = await getIt<IEmployeeRepository>().getEmployees();
+    if (!mounted) return;
+
+    // 2. Si el producto NO está activado y no hay datos locales previa activación, exigir activación por Licencia + PIN Admin
+    bool isActivated = status?['isActivated'] == true || localEmps.isNotEmpty;
     while (!isActivated && mounted) {
       isActivated = await ProductActivationDialog.show(context, deviceId: deviceId);
     }
     if (!mounted) return;
 
     // 3. Si no existen operarios creados en el sistema, ejecutar Onboarding / Configuración Inicial
-    bool hasEmployees = status?['hasEmployees'] == true;
+    bool hasEmployees = status?['hasEmployees'] == true || localEmps.isNotEmpty;
     if (!hasEmployees && mounted) {
       final setupResult = await InitialSetupDialog.show(context);
       if (setupResult != null && mounted) {
@@ -93,6 +99,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -306,13 +313,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           child: Row(
                             children: [
                               _buildMiniBadge('Al Día (<15d)', countOk,
-                                  const Color(0xFF00E676)),
+                                  const Color(0xFF00E676), GrilleStatus.ok),
                               const SizedBox(width: 6),
                               _buildMiniBadge('Atención (≥15d)', countWarning,
-                                  const Color(0xFFFFD600)),
+                                  const Color(0xFFFFD600), GrilleStatus.warning),
                               const SizedBox(width: 6),
                               _buildMiniBadge('Urgente (≥20d)', countUrgent,
-                                  const Color(0xFFFF1744)),
+                                  const Color(0xFFFF1744), GrilleStatus.urgent),
                               const SizedBox(width: 12),
                               Expanded(child: _buildSearchField()),
                             ],
@@ -322,14 +329,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                       // Tab Views
                       Expanded(
-                        child: TabBarView(
-                          children: [
-                            _buildFacadeViewAll(allGrilles),
-                            _buildSingleBlockView('MG-01', allGrilles),
-                            _buildSingleBlockView('MG-02', allGrilles),
-                            _buildSingleBlockView('MG-03', allGrilles),
-                          ],
-                        ),
+                        child: () {
+                          final filteredGrilles = _filterList(allGrilles);
+                          return TabBarView(
+                            children: [
+                              _buildFacadeViewAll(filteredGrilles),
+                              _buildSingleBlockView('MG-01', filteredGrilles),
+                              _buildSingleBlockView('MG-02', filteredGrilles),
+                              _buildSingleBlockView('MG-03', filteredGrilles),
+                            ],
+                          );
+                        }(),
                       ),
                     ],
                   ),
@@ -341,6 +351,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildSearchField() {
     return TextField(
+      controller: _searchController,
       style: const TextStyle(color: Colors.white, fontSize: 13),
       decoration: InputDecoration(
         hintText: 'Buscar por código (ej. R01, R15)...',
@@ -351,6 +362,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ? IconButton(
                 icon: const Icon(Icons.close, size: 18, color: Colors.white70),
                 onPressed: () {
+                  _debounceTimer?.cancel();
+                  _searchController.clear();
                   setState(() => _searchQuery = '');
                 },
               )
@@ -380,48 +393,64 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildMiniBadge(String label, int count, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.2),
-        border: Border.all(color: color),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '$count ',
-            style: TextStyle(
-                fontWeight: FontWeight.bold, fontSize: 13, color: color),
-          ),
-          Text(
-            label,
-            style: TextStyle(fontSize: 10, color: color),
-          ),
-        ],
+  Widget _buildMiniBadge(
+      String label, int count, Color color, GrilleStatus status) {
+    final isSelected = _selectedStatusFilter == status;
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _selectedStatusFilter = isSelected ? null : status;
+        });
+      },
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? color : color.withValues(alpha: 0.2),
+          border: Border.all(color: color, width: isSelected ? 2 : 1),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$count ',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  color: isSelected ? Colors.black : color),
+            ),
+            Text(
+              label,
+              style: TextStyle(
+                  fontSize: 10,
+                  color: isSelected ? Colors.black : color,
+                  fontWeight:
+                      isSelected ? FontWeight.bold : FontWeight.normal),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   // Full Facade View representing the 3 Blocks (MG-01, MG-02, MG-03)
-  Widget _buildFacadeViewAll(List<Grille> allGrilles) {
+  Widget _buildFacadeViewAll(List<Grille> filteredGrilles) {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
         _buildBlockCard('MG-01', 'Bloque Izquierdo (MG-01)',
-            'R01 a R08 (8 Rejillas)', allGrilles),
+            'R01 a R08 (8 Rejillas)', filteredGrilles),
         _buildBlockCard('MG-02', 'Bloque Centro (MG-02)',
-            'R09 a R14 (6 Rejillas)', allGrilles),
+            'R09 a R14 (6 Rejillas)', filteredGrilles),
         _buildBlockCard('MG-03', 'Bloque Derecho (MG-03)',
-            'R15 a R22 (8 Rejillas)', allGrilles),
+            'R15 a R22 (8 Rejillas)', filteredGrilles),
       ],
     );
   }
 
   // Single Block View for tabs
-  Widget _buildSingleBlockView(String blockCode, List<Grille> allGrilles) {
+  Widget _buildSingleBlockView(String blockCode, List<Grille> filteredGrilles) {
     String title = blockCode == 'MG-01'
         ? 'Bloque Izquierdo (MG-01)'
         : blockCode == 'MG-02'
@@ -436,16 +465,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
-        _buildBlockCard(blockCode, title, subtitle, allGrilles),
+        _buildBlockCard(blockCode, title, subtitle, filteredGrilles),
       ],
     );
   }
 
   // Physical Facade Block Card with Upper and Lower Rows matching field photo
   Widget _buildBlockCard(
-      String blockCode, String title, String subtitle, List<Grille> allGrilles) {
+      String blockCode, String title, String subtitle, List<Grille> filteredGrilles) {
     final grillesInBlock =
-        _filterList(allGrilles.where((g) => g.blockCode == blockCode).toList());
+        filteredGrilles.where((g) => g.blockCode == blockCode).toList();
 
     if (grillesInBlock.isEmpty) {
       return Card(

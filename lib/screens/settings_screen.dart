@@ -5,6 +5,7 @@ import '../di/service_locator.dart';
 import '../models/models.dart';
 import '../repositories/auth_repository.dart';
 import '../repositories/employee_repository.dart';
+import '../widgets/blocking_login_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final IEmployeeRepository? employeeRepository;
@@ -34,6 +35,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   List<Employee> _employees = [];
   bool _isLoadingEmployees = false;
+  Map<String, String>? _activeOperator;
 
   @override
   void initState() {
@@ -41,9 +43,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _employeeRepository = widget.employeeRepository ?? getIt<IEmployeeRepository>();
     _authRepository = widget.authRepository ?? getIt<IAuthRepository>();
 
+    _checkSession();
     _loadSavedUrl();
-    _loadLicenseInfo();
-    _fetchEmployees();
+  }
+
+  Future<void> _checkSession() async {
+    final active = await _authRepository.getActiveOperator();
+    if (mounted) {
+      setState(() => _activeOperator = active);
+    }
+  }
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchEmployees() async {
@@ -90,12 +104,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirm == true) {
       final ok = await _employeeRepository.deleteEmployee(emp.payrollCode);
       if (ok) {
+        final activeOp = await _authRepository.getActiveOperator();
+        bool sessionCleared = false;
+        if (activeOp != null &&
+            activeOp['code']?.trim().toUpperCase() == emp.payrollCode.trim().toUpperCase()) {
+          await _authRepository.clearActiveOperator();
+          sessionCleared = true;
+        }
+
         _fetchEmployees();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Usuario ${emp.payrollCode} eliminado correctamente.'),
-              backgroundColor: Colors.green,
+              content: Text(
+                sessionCleared
+                    ? 'Usuario ${emp.payrollCode} eliminado. La sesión activa de este operario ha sido cerrada.'
+                    : 'Usuario ${emp.payrollCode} eliminado correctamente.',
+              ),
+              backgroundColor: sessionCleared ? Colors.orange : Colors.green,
             ),
           );
         }
@@ -118,8 +144,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted && status != null) {
       setState(() {
         _isLicenseActive = status['isActivated'] == true;
-        _activeLicenseKey = status['licenseKey'] ?? 'No Activada';
-        _licenseDaysRem = 365;
+        _activeLicenseKey = status['licenseKey'] ?? status['license_key'] ?? 'No Activada';
+        _licenseDaysRem = status['daysRemaining'] ?? status['days_remaining'] ?? 0;
       });
     }
   }
@@ -133,6 +159,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _authRepository.updateBaseUrl(_urlController.text.trim());
     final isOk = await _authRepository.checkHealth();
 
+    if (!mounted) return;
+
     setState(() {
       _isTesting = false;
       _connectionStatus = isOk
@@ -140,32 +168,131 @@ class _SettingsScreenState extends State<SettingsScreen> {
           : 'Sin conexión a la API backend';
     });
 
-    if (mounted && isOk) {
+    if (isOk) {
       context.read<GrilleCubit>().loadGrilles();
-      _loadLicenseInfo();
-      _fetchEmployees();
     }
+    _loadLicenseInfo();
+    _fetchEmployees();
   }
 
   Future<void> _runSeed() async {
+    final pinController = TextEditingController();
+    String? errorMsg;
+
+    final confirmedPin = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1B2228),
+            title: const Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Colors.amberAccent, size: 28),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Reiniciar Base de Datos (Seed)',
+                    style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '⚠️ ATENCIÓN: Esta acción re-inicialización restablecerá las 22 rejillas y 88 filtros, eliminando el historial de mantenimientos acumulados.',
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: pinController,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Colors.white, letterSpacing: 2),
+                    decoration: InputDecoration(
+                      labelText: 'Clave Administrador para autorizar',
+                      hintText: '••••',
+                      prefixIcon: const Icon(Icons.lock, color: Colors.cyanAccent),
+                      filled: true,
+                      fillColor: const Color(0xFF12161A),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                  if (errorMsg != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      errorMsg!,
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('Cancelar', style: TextStyle(color: Colors.white54)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+                onPressed: () async {
+                  final pin = pinController.text.trim();
+                  if (pin.isEmpty) {
+                    setDialogState(() => errorMsg = 'Ingrese la clave de Administrador.');
+                    return;
+                  }
+                  final isValid = await _authRepository.validateAdminPin(pin);
+                  if (ctx.mounted) {
+                    if (isValid) {
+                      Navigator.pop(ctx, pin);
+                    } else {
+                      setDialogState(() => errorMsg = 'Clave de Administrador incorrecta.');
+                    }
+                  }
+                },
+                child: const Text('Confirmar Seed'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    pinController.dispose();
+
+    if (confirmedPin == null || confirmedPin.isEmpty || !mounted) return;
+
     setState(() => _isTesting = true);
-    final ok = await context.read<GrilleCubit>().seedDatabase();
+    final ok = await context.read<GrilleCubit>().seedDatabase(confirmedPin);
+
+    if (!mounted) return;
+
     setState(() => _isTesting = false);
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(ok
-              ? 'Seed completado: 22 rejillas y 88 filtros creados en la base de datos.'
-              : 'Error al ejecutar Seed.'),
-          backgroundColor: ok ? Colors.green : Colors.red,
-        ),
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Seed completado: 22 rejillas y 88 filtros creados en la base de datos.'
+            : 'Error al ejecutar Seed.'),
+        backgroundColor: ok ? Colors.green : Colors.red,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_activeOperator == null) {
+      return BlockingLoginScreen(
+        onLoginSuccess: (op) {
+          setState(() => _activeOperator = op);
+          _loadSavedUrl();
+        },
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Configuración & Servidor'),

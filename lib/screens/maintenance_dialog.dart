@@ -5,6 +5,20 @@ import '../repositories/auth_repository.dart';
 import '../repositories/employee_repository.dart';
 import '../repositories/grille_repository.dart';
 
+class MaintenanceResult {
+  final List<int> successfulFilters;
+  final List<int> failedFilters;
+
+  const MaintenanceResult({
+    required this.successfulFilters,
+    required this.failedFilters,
+  });
+
+  bool get isFullSuccess => failedFilters.isEmpty && successfulFilters.isNotEmpty;
+  bool get isPartialSuccess => successfulFilters.isNotEmpty && failedFilters.isNotEmpty;
+  bool get isFullFailure => successfulFilters.isEmpty;
+}
+
 class MaintenanceDialog extends StatefulWidget {
   final Grille grille;
   final FilterItem? selectedFilter;
@@ -44,7 +58,7 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
     _employeeRepository = widget.employeeRepository ?? getIt<IEmployeeRepository>();
     _authRepository = widget.authRepository ?? getIt<IAuthRepository>();
 
-    _selectedPayrollCode = _employees.isNotEmpty ? _employees.first.payrollCode : 'EMP-001';
+    _selectedPayrollCode = _employees.isNotEmpty ? _employees.first.payrollCode : '';
     _payrollController.text = _selectedPayrollCode;
 
     if (widget.selectedFilter != null) {
@@ -53,6 +67,13 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
       _selectedFilterNumbers = [1, 2, 3, 4];
     }
     _loadEmployees();
+  }
+
+  @override
+  void dispose() {
+    _payrollController.dispose();
+    _notesController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadEmployees() async {
@@ -76,9 +97,17 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
   }
 
   Future<void> _submit() async {
-    final payrollCode = _payrollController.text.trim().isEmpty
-        ? 'EMP-001'
-        : _payrollController.text.trim();
+    final inputPayrollCode = _payrollController.text.trim().toUpperCase();
+
+    if (inputPayrollCode.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Por favor ingrese o seleccione su código de nómina.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
 
     if (_selectedFilterNumbers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -87,24 +116,68 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
       return;
     }
 
+    var empList = _employees;
+    if (empList.isEmpty) {
+      empList = await _employeeRepository.getEmployees();
+    }
+
+    final activeOp = await _authRepository.getActiveOperator();
+    if (!mounted) return;
+
+    final activeCode = activeOp?['code']?.trim().toUpperCase();
+
+    final existsInList = empList.any((e) => e.payrollCode.trim().toUpperCase() == inputPayrollCode);
+    final isCurrentActiveOp = activeCode != null && activeCode == inputPayrollCode;
+
+    if (!existsInList && !isCurrentActiveOp) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('El código "$inputPayrollCode" no corresponde a ningún operario registrado.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
-    bool successAll = true;
+    final List<int> successfulFilters = [];
+    final List<int> failedFilters = [];
+
     for (int fNum in _selectedFilterNumbers) {
       final res = await _grilleRepository.registerEvent(
         grilleCode: widget.grille.code,
         filterNumber: fNum,
-        payrollCode: payrollCode,
+        payrollCode: inputPayrollCode,
         notes: _notesController.text.trim().isEmpty
             ? 'Mantenimiento registrado'
             : _notesController.text.trim(),
       );
-      if (!res) successAll = false;
+      if (res) {
+        successfulFilters.add(fNum);
+      } else {
+        failedFilters.add(fNum);
+      }
     }
 
-    if (mounted) {
-      setState(() => _isLoading = false);
-      Navigator.of(context).pop(successAll);
+    if (!mounted) return;
+
+    setState(() => _isLoading = false);
+
+    final result = MaintenanceResult(
+      successfulFilters: successfulFilters,
+      failedFilters: failedFilters,
+    );
+
+    if (result.isFullFailure) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('❌ No se pudo registrar el mantenimiento en ningún filtro. Reintente.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } else {
+      Navigator.of(context).pop(result);
     }
   }
 
@@ -242,6 +315,11 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
                     vertical: 10,
                   ),
                 ),
+                onChanged: (val) {
+                  setState(() {
+                    _selectedPayrollCode = val.trim().toUpperCase();
+                  });
+                },
               ),
               const SizedBox(height: 12),
               const Text(

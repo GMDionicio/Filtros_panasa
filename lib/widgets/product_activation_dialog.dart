@@ -87,8 +87,23 @@ class _ProductActivationDialogState extends State<ProductActivationDialog> {
         });
       }
     } catch (e) {
+      // Intentar validación offline por PIN de Administrador
+      try {
+        final isValidPin = await _authRepository.validateAdminPin(adminPin);
+        if (isValidPin) {
+          await _authRepository.saveSetting('is_activated', 'true');
+          if (licenseKey.isNotEmpty) {
+            await _authRepository.saveSetting('license_key', licenseKey);
+          }
+          if (mounted) {
+            Navigator.of(context).pop(true);
+          }
+          return;
+        }
+      } catch (_) {}
+
       setState(() {
-        _errorMessage = 'Error de conexión al validar la licencia.';
+        _errorMessage = 'Sin conexión con el servidor. Ingrese un PIN de Administrador válido para activar offline.';
       });
     } finally {
       if (mounted) {

@@ -248,13 +248,11 @@ class LocalDataSourceImpl implements LocalDataSource {
       if (db != null) {
         try {
           final raw = await db.query('employees');
-          if (raw.isNotEmpty) {
-            return raw.map((e) => Employee(
-              payrollCode: e['payroll_code'] as String,
-              name: e['name'] as String,
-              active: (e['active'] as int? ?? 1) == 1,
-            )).toList();
-          }
+          return raw.map((e) => Employee(
+            payrollCode: e['payroll_code'] as String,
+            name: e['name'] as String,
+            active: (e['active'] as int? ?? 1) == 1,
+          )).toList();
         } catch (e) {
           debugPrint('Error reading employees from sqflite: $e');
         }
@@ -368,35 +366,33 @@ class LocalDataSourceImpl implements LocalDataSource {
           final rawGrilles = await db.query('grilles');
           final rawFilters = await db.query('filters');
 
-          if (rawGrilles.isNotEmpty) {
-            Map<String, List<FilterItem>> filtersMap = {};
-            for (var f in rawFilters) {
-              final gCode = f['grille_code'] as String;
-              filtersMap.putIfAbsent(gCode, () => []);
-              filtersMap[gCode]!.add(FilterItem(
-                id: f['id'] as String,
-                grilleCode: gCode,
-                filterNumber: f['filter_number'] as int,
-                positionLabel: f['position_label'] as String,
-                lastReplacedAt: f['last_replaced_at'] != null
-                    ? DateTime.tryParse(f['last_replaced_at'] as String)
-                    : null,
-                lastEmployeeCode: f['last_employee_code'] as String?,
-              ));
-            }
-
-            List<Grille> list = [];
-            for (var g in rawGrilles) {
-              final code = g['code'] as String;
-              list.add(Grille(
-                code: code,
-                name: g['name'] as String,
-                position: g['position'] as int,
-                filters: filtersMap[code] ?? [],
-              ));
-            }
-            if (list.isNotEmpty) return list;
+          Map<String, List<FilterItem>> filtersMap = {};
+          for (var f in rawFilters) {
+            final gCode = f['grille_code'] as String;
+            filtersMap.putIfAbsent(gCode, () => []);
+            filtersMap[gCode]!.add(FilterItem(
+              id: f['id'] as String,
+              grilleCode: gCode,
+              filterNumber: f['filter_number'] as int,
+              positionLabel: f['position_label'] as String,
+              lastReplacedAt: f['last_replaced_at'] != null
+                  ? DateTime.tryParse(f['last_replaced_at'] as String)
+                  : null,
+              lastEmployeeCode: f['last_employee_code'] as String?,
+            ));
           }
+
+          List<Grille> list = [];
+          for (var g in rawGrilles) {
+            final code = g['code'] as String;
+            list.add(Grille(
+              code: code,
+              name: g['name'] as String,
+              position: g['position'] as int,
+              filters: filtersMap[code] ?? [],
+            ));
+          }
+          return list;
         } catch (e) {
           debugPrint('Error reading grilles from sqflite: $e');
         }
@@ -490,7 +486,7 @@ class LocalDataSourceImpl implements LocalDataSource {
       if (db != null) {
         try {
           final res = await db.query('pending_events');
-          if (res.isNotEmpty) return res;
+          return res;
         } catch (e) {
           debugPrint('Error reading pending events from sqflite: $e');
         }

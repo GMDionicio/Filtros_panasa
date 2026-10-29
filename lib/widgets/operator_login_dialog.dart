@@ -128,8 +128,26 @@ class _OperatorLoginDialogState extends State<OperatorLoginDialog> {
         });
       }
     } catch (e) {
+      try {
+        final localEmps = await _employeeRepository.getEmployees();
+        final matched = localEmps.firstWhere(
+          (e) => e.payrollCode.trim().toUpperCase() == inputCode,
+          orElse: () => Employee(payrollCode: '', name: ''),
+        );
+        if (matched.payrollCode.isNotEmpty) {
+          await _authRepository.saveActiveOperator(matched.payrollCode, matched.name);
+          if (mounted) {
+            Navigator.of(context).pop({
+              'code': matched.payrollCode,
+              'name': matched.name,
+            });
+          }
+          return;
+        }
+      } catch (_) {}
+
       setState(() {
-        _errorMessage = 'Error al validar código con el servidor.';
+        _errorMessage = 'No se pudo verificar el código "$inputCode". Ingrese un código registrado.';
       });
     } finally {
       if (mounted) {

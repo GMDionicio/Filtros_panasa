@@ -30,7 +30,7 @@ abstract class RemoteDataSource {
   Future<void> logoutOperator({required String deviceId, String? token});
   Future<bool> validateAdminPin(String pin);
   Future<bool> checkHealth();
-  Future<bool> seedBackendDatabase();
+  Future<bool> seedBackendDatabase(String adminPin);
   Future<bool> syncPendingEvent(Map<String, dynamic> item);
   Future<Map<String, dynamic>?> fetchGrillesAndEvents();
   Future<bool> registerEvent({
@@ -231,8 +231,12 @@ class RemoteDataSourceImpl implements RemoteDataSource {
   Future<Map<String, dynamic>?> checkOperatorSession({required String deviceId}) async {
     await initBaseUrl();
     try {
+      final headers = await getAuthHeaders();
       final response = await http
-          .get(Uri.parse('$_baseUrl/api/operator/session/$deviceId'))
+          .get(
+            Uri.parse('$_baseUrl/api/operator/session/$deviceId'),
+            headers: headers,
+          )
           .timeout(const Duration(seconds: 6));
 
       if (response.statusCode == 200) {
@@ -299,13 +303,16 @@ class RemoteDataSourceImpl implements RemoteDataSource {
   }
 
   @override
-  Future<bool> seedBackendDatabase() async {
+  Future<bool> seedBackendDatabase(String adminPin) async {
     await initBaseUrl();
     try {
+      final headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/json';
       final response = await http
           .post(
             Uri.parse('$_baseUrl/api/seed'),
-            headers: {'Content-Type': 'application/json'},
+            headers: headers,
+            body: jsonEncode({'adminPin': adminPin.trim()}),
           )
           .timeout(const Duration(seconds: 8));
 
@@ -321,13 +328,14 @@ class RemoteDataSourceImpl implements RemoteDataSource {
     await initBaseUrl();
     try {
       final headers = await getAuthHeaders();
+      final deviceId = await localDataSource.getOrCreateDeviceId();
       final body = jsonEncode({
         'eventId': item['event_id'],
         'grilleCode': item['grille_code'],
         'filterNumber': item['filter_number'],
         'payrollCode': item['payroll_code'],
         'occurredAt': item['occurred_at'],
-        'deviceInstallationId': 'EMULATOR-001',
+        'deviceInstallationId': deviceId,
         'notes': item['notes'],
       });
 
@@ -390,6 +398,7 @@ class RemoteDataSourceImpl implements RemoteDataSource {
     final now = DateTime.now();
     try {
       final headers = await getAuthHeaders();
+      final deviceId = await localDataSource.getOrCreateDeviceId();
       final eventId = 'EVT-${now.millisecondsSinceEpoch}-$filterNumber';
       final body = jsonEncode({
         'eventId': eventId,
@@ -397,7 +406,7 @@ class RemoteDataSourceImpl implements RemoteDataSource {
         'filterNumber': filterNumber,
         'payrollCode': payrollCode,
         'occurredAt': now.toIso8601String(),
-        'deviceInstallationId': kIsWeb ? 'WEB-BROWSER' : 'ANDROID-APP',
+        'deviceInstallationId': deviceId,
         'notes': notes ??
             (kIsWeb
                 ? 'Mantenimiento registrado desde Web'

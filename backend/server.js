@@ -191,16 +191,27 @@ function dbRun(sql, params = []) {
   });
 }
 
+// Cola secuencial de transacciones para prevenir colisiones en la conexión global de SQLite
+let transactionQueue = Promise.resolve();
+
 async function dbExecTransaction(operations) {
-  await dbRun('BEGIN IMMEDIATE TRANSACTION');
-  try {
-    const result = await operations();
-    await dbRun('COMMIT');
-    return result;
-  } catch (err) {
-    await dbRun('ROLLBACK');
-    throw err;
-  }
+  const currentTransaction = transactionQueue.then(async () => {
+    await dbRun('BEGIN IMMEDIATE TRANSACTION');
+    try {
+      const result = await operations();
+      await dbRun('COMMIT');
+      return result;
+    } catch (err) {
+      try {
+        await dbRun('ROLLBACK');
+      } catch (_) {}
+      throw err;
+    }
+  });
+
+  transactionQueue = currentTransaction.catch(() => {});
+
+  return currentTransaction;
 }
 
 async function createTables() {
@@ -522,11 +533,27 @@ app.get('/api/system/status/:deviceId', async (req, res, next) => {
     const grCount = await dbQueryGet(`SELECT COUNT(*) as count FROM grilles`);
     const hasGrilles = grCount && grCount.count > 0;
 
+    // 4. Calcular días restantes dinámicamente según expiración o fecha de activación
+    let daysRemaining = 0;
+    if (isActivated && licRow) {
+      if (licRow.expires_at_ts) {
+        const expDate = new Date(licRow.expires_at_ts);
+        const diffMs = expDate.getTime() - Date.now();
+        daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+      } else {
+        const actDate = new Date(licRow.activated_at_ts || licRow.created_at_ts || Date.now());
+        const expDate = new Date(actDate.getTime() + 365 * 24 * 60 * 60 * 1000);
+        const diffMs = expDate.getTime() - Date.now();
+        daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+      }
+    }
+
     res.json({
       success: true,
       deviceId,
       isActivated,
       licenseKey: licRow ? (licRow.license_key || 'PAN-2026-PANASA-PROD') : null,
+      daysRemaining,
       hasEmployees,
       hasGrilles
     });
@@ -560,7 +587,9 @@ app.post('/api/system/setup', async (req, res, next) => {
     const name = String(initialEmployeeName || 'Operario Principal').trim();
 
     await dbRun(
-      `INSERT OR REPLACE INTO employees (payroll_code, name, active, created_at_ts) VALUES (?, ?, 1, CURRENT_TIMESTAMP)`,
+      `INSERT INTO employees (payroll_code, name, active, created_at_ts)
+       VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+       ON CONFLICT(payroll_code) DO UPDATE SET name = excluded.name, active = 1`,
       [code, name]
     );
 
@@ -928,20 +957,15 @@ app.post('/api/employees', async (req, res, next) => {
       return res.status(400).json({ error: 'Campos requeridos: payrollCode y name' });
     }
 
-    const code = String(payrollCode).trim();
+    const code = String(payrollCode).trim().toUpperCase();
     const empName = String(name).trim();
 
-    try {
-      await dbRun(
-        `INSERT OR REPLACE INTO employees (payroll_code, name, active, created_at_ts) VALUES (?, ?, 1, CURRENT_TIMESTAMP)`,
-        [code, empName]
-      );
-    } catch (_) {
-      await dbRun(
-        `INSERT OR REPLACE INTO employees (payroll_code, name) VALUES (?, ?)`,
-        [code, empName]
-      );
-    }
+    await dbRun(
+      `INSERT INTO employees (payroll_code, name, active, created_at_ts)
+       VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+       ON CONFLICT(payroll_code) DO UPDATE SET name = excluded.name, active = 1`,
+      [code, empName]
+    );
 
     res.json({ success: true, payrollCode: code, name: empName });
   } catch (err) {
@@ -958,16 +982,19 @@ app.delete('/api/employees/:payrollCode', async (req, res, next) => {
 
     const code = String(payrollCode).trim().toUpperCase();
     await dbExecTransaction(async () => {
-      await dbRun(`DELETE FROM employees WHERE UPPER(payroll_code) = ?`, [code]);
+      // Desactivación lógica (soft delete) del empleado
+      await dbRun(`UPDATE employees SET active = 0 WHERE UPPER(payroll_code) = ?`, [code]);
+      // Inactivación de sesiones activas del operario
       await dbRun(`UPDATE operator_sessions SET active = 0 WHERE UPPER(payroll_code) = ?`, [code]);
+      // Registro en log de auditoría
       await dbRun(
         `INSERT INTO audit_events (id, actor, action, target, details, created_at_ts)
-         VALUES (?, 'system', 'employee_delete', 'employee', ?, CURRENT_TIMESTAMP)`,
+         VALUES (?, 'system', 'employee_disable', 'employee', ?, CURRENT_TIMESTAMP)`,
         [uuidv4(), JSON.stringify({ payrollCode: code })]
       );
     });
 
-    res.json({ success: true, payrollCode: code, message: 'Operario eliminado exitosamente' });
+    res.json({ success: true, payrollCode: code, message: 'Operario desactivado exitosamente' });
   } catch (err) {
     next(err);
   }

@@ -48,7 +48,7 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
   }
 
   Future<void> _openMaintenanceDialog([FilterItem? filter]) async {
-    final result = await showDialog<bool>(
+    final result = await showDialog<dynamic>(
       context: context,
       builder: (context) => MaintenanceDialog(
         grille: _grille,
@@ -56,7 +56,34 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
       ),
     );
 
-    if (result == true) {
+    if (result is MaintenanceResult) {
+      if (result.isFullSuccess || result.isPartialSuccess) {
+        if (mounted) {
+          context.read<GrilleCubit>().loadGrilles();
+
+          if (result.isFullSuccess) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '✅ Mantenimiento registrado correctamente en ${result.successfulFilters.length} filtro(s).',
+                ),
+                backgroundColor: Colors.green,
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '⚠️ Mantenimiento registrado en filtro(s) #${result.successfulFilters.join(", ")}. Falló en #${result.failedFilters.join(", ")}.',
+                ),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          Navigator.of(context).pop(); // Volver al dashboard con datos frescos
+        }
+      }
+    } else if (result == true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

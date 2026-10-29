@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../datasources/local_data_source.dart';
@@ -47,12 +48,18 @@ class GrilleCubit extends Cubit<GrilleState> {
   final SyncManager syncManager;
   final LocalDataSource localDataSource;
 
+  StreamSubscription<void>? _syncSubscription;
+
   GrilleCubit({
     required this.grilleRepository,
     required this.authRepository,
     required this.syncManager,
     required this.localDataSource,
-  }) : super(GrilleInitial());
+  }) : super(GrilleInitial()) {
+    _syncSubscription = syncManager.onSyncCompleted.listen((_) {
+      loadGrilles();
+    });
+  }
 
   Future<void> loadGrilles() async {
     if (state is! GrilleLoaded) {
@@ -81,13 +88,18 @@ class GrilleCubit extends Cubit<GrilleState> {
 
   Future<void> syncPendingBatch() async {
     await syncManager.syncPendingEvents();
-    await loadGrilles();
   }
 
-  Future<bool> seedDatabase() async {
+  Future<bool> seedDatabase(String adminPin) async {
     emit(GrilleLoading());
-    final ok = await grilleRepository.seedDatabase();
+    final ok = await grilleRepository.seedDatabase(adminPin);
     await loadGrilles();
     return ok;
+  }
+
+  @override
+  Future<void> close() {
+    _syncSubscription?.cancel();
+    return super.close();
   }
 }

@@ -12,7 +12,7 @@ abstract class IGrilleRepository {
     required String payrollCode,
     String? notes,
   });
-  Future<bool> seedDatabase();
+  Future<bool> seedDatabase(String adminPin);
   Future<bool> restoreDataFromBackend({String? deviceId, String? licenseKey});
 }
 
@@ -70,6 +70,41 @@ class GrilleRepositoryImpl implements IGrilleRepository {
         ));
       }
 
+      // Fusionar eventos pendientes locales que aún no se han enviado al servidor
+      final pendingList = await localDataSource.getPendingEvents();
+      if (pendingList.isNotEmpty) {
+        for (var p in pendingList) {
+          final gCode = p['grille_code'] as String?;
+          final fNum = p['filter_number'] as int?;
+          final empCode = p['payroll_code'] as String?;
+          final occAtStr = p['occurred_at'] as String?;
+
+          if (gCode != null && fNum != null && occAtStr != null) {
+            final occAt = DateTime.tryParse(occAtStr);
+            final gIndex = grilles.indexWhere((g) => g.code == gCode);
+            if (gIndex != -1) {
+              final fIndex = grilles[gIndex].filters.indexWhere((f) => f.filterNumber == fNum);
+              if (fIndex != -1) {
+                final currentFilter = grilles[gIndex].filters[fIndex];
+                if (occAt != null &&
+                    (currentFilter.lastReplacedAt == null ||
+                        occAt.isAfter(currentFilter.lastReplacedAt!))) {
+                  grilles[gIndex].filters[fIndex] = FilterItem(
+                    id: currentFilter.id,
+                    grilleCode: currentFilter.grilleCode,
+                    filterNumber: currentFilter.filterNumber,
+                    positionLabel: currentFilter.positionLabel,
+                    lastReplacedAt: occAt,
+                    lastEmployeeCode: empCode,
+                    lastEmployeeName: currentFilter.lastEmployeeName,
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+
       if (grilles.isNotEmpty) {
         await localDataSource.saveGrilles(grilles);
         return grilles;
@@ -113,12 +148,6 @@ class GrilleRepositoryImpl implements IGrilleRepository {
     }
 
     if (!kIsWeb) {
-      await localDataSource.updateLocalFilterReplacement(
-        grilleCode: grilleCode,
-        filterNumber: filterNumber,
-        payrollCode: payrollCode,
-        replacedAt: now,
-      );
       await localDataSource.savePendingEvent(
         grilleCode: grilleCode,
         filterNumber: filterNumber,
@@ -133,12 +162,16 @@ class GrilleRepositoryImpl implements IGrilleRepository {
   }
 
   @override
-  Future<bool> seedDatabase() async {
+  Future<bool> seedDatabase(String adminPin) async {
+    final okRemote = await remoteDataSource.seedBackendDatabase(adminPin);
+    if (!okRemote) {
+      return false;
+    }
+
     await localDataSource.clearLocalGrillesAndEvents();
     final cleanMock = _generateMockGrilles();
     await localDataSource.saveGrilles(cleanMock);
 
-    await remoteDataSource.seedBackendDatabase();
     await getGrilles();
     return true;
   }

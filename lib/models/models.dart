@@ -1,5 +1,27 @@
 import '../config/business_rules.dart';
 
+/// Función auxiliar para el parseo seguro y flexible de fechas (ISO 8601, timestamps en ms/seg o Strings numéricos)
+DateTime? _parseDateTime(dynamic val) {
+  if (val == null) return null;
+  if (val is DateTime) return val;
+  if (val is String && val.trim().isNotEmpty) {
+    final parsed = DateTime.tryParse(val.trim());
+    if (parsed != null) return parsed;
+    final numVal = int.tryParse(val.trim());
+    if (numVal != null) {
+      return numVal < 10000000000
+          ? DateTime.fromMillisecondsSinceEpoch(numVal * 1000)
+          : DateTime.fromMillisecondsSinceEpoch(numVal);
+    }
+  }
+  if (val is int) {
+    return val < 10000000000
+        ? DateTime.fromMillisecondsSinceEpoch(val * 1000)
+        : DateTime.fromMillisecondsSinceEpoch(val);
+  }
+  return null;
+}
+
 class Grille {
   final String code;
   final String name;
@@ -68,12 +90,36 @@ class Grille {
   }
 
   factory Grille.fromJson(Map<String, dynamic> json) {
+    final code = json['grille_code'] ?? json['code'] ?? '';
+    final rawFilters = json['filters'];
+    List<FilterItem> parsedFilters = [];
+
+    if (rawFilters != null && rawFilters is List) {
+      parsedFilters = rawFilters
+          .map((f) => FilterItem.fromJson(f is Map<String, dynamic>
+              ? f
+              : Map<String, dynamic>.from(f as Map)))
+          .toList();
+    }
+
     return Grille(
-      code: json['grille_code'] ?? '',
-      name: json['name'] ?? '',
+      code: code,
+      name: json['name'] ?? (code.isNotEmpty ? 'Rejilla $code' : ''),
       position: json['position'] ?? 0,
-      filters: [],
+      lastMaintenance:
+          _parseDateTime(json['last_maintenance'] ?? json['lastMaintenance']),
+      filters: parsedFilters,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'grille_code': code,
+      'name': name,
+      'position': position,
+      'last_maintenance': lastMaintenance?.toIso8601String(),
+      'filters': filters.map((f) => f.toJson()).toList(),
+    };
   }
 }
 
@@ -109,12 +155,34 @@ class FilterItem {
   }
 
   factory FilterItem.fromJson(Map<String, dynamic> json) {
+    final gCode = json['grille_code'] ?? json['grilleCode'] ?? '';
+    final fNum = json['filter_number'] ?? json['filterNumber'] ?? 1;
+    final fallbackId = gCode.isNotEmpty ? '${gCode}_$fNum' : '';
+
     return FilterItem(
-      id: json['id'] ?? '',
-      grilleCode: json['grille_code'] ?? '',
-      filterNumber: json['filter_number'] ?? 1,
-      positionLabel: json['position'] ?? '',
+      id: json['id'] ?? fallbackId,
+      grilleCode: gCode,
+      filterNumber: fNum,
+      positionLabel: json['position_label'] ?? json['position'] ?? '',
+      lastReplacedAt:
+          _parseDateTime(json['last_replaced_at'] ?? json['lastReplacedAt']),
+      lastEmployeeCode:
+          json['last_employee_code'] ?? json['lastEmployeeCode'],
+      lastEmployeeName:
+          json['last_employee_name'] ?? json['lastEmployeeName'],
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'grille_code': grilleCode,
+      'filter_number': filterNumber,
+      'position_label': positionLabel,
+      'last_replaced_at': lastReplacedAt?.toIso8601String(),
+      'last_employee_code': lastEmployeeCode,
+      'last_employee_name': lastEmployeeName,
+    };
   }
 }
 
@@ -131,10 +199,20 @@ class Employee {
 
   factory Employee.fromJson(Map<String, dynamic> json) {
     return Employee(
-      payrollCode: json['payroll_code'] ?? '',
+      payrollCode: json['payroll_code'] ?? json['payrollCode'] ?? '',
       name: json['name'] ?? '',
-      active: (json['active'] ?? 1) == 1,
+      active: json['active'] == null
+          ? true
+          : (json['active'] == 1 || json['active'] == true || json['active'] == '1'),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'payroll_code': payrollCode,
+      'name': name,
+      'active': active ? 1 : 0,
+    };
   }
 }
 
@@ -159,14 +237,31 @@ class FilterEvent {
   });
 
   factory FilterEvent.fromJson(Map<String, dynamic> json) {
+    final rawTs = json['occurred_at_ts'] ??
+        json['occurred_at'] ??
+        json['occurredAt'] ??
+        json['timestamp'];
+    final parsedDate = _parseDateTime(rawTs);
+
     return FilterEvent(
-      eventId: json['event_id'] ?? '',
-      grilleCode: json['grille_code'] ?? '',
-      filterNumber: json['filter_number'] ?? 1,
-      payrollCode: json['payroll_code'] ?? '',
-      occurredAt: DateTime.tryParse(json['occurred_at_ts'] ?? '') ?? DateTime.now(),
+      eventId: json['event_id'] ?? json['eventId'] ?? json['id'] ?? '',
+      grilleCode: json['grille_code'] ?? json['grilleCode'] ?? '',
+      filterNumber: json['filter_number'] ?? json['filterNumber'] ?? 1,
+      payrollCode: json['payroll_code'] ?? json['payrollCode'] ?? '',
+      occurredAt: parsedDate ?? DateTime.fromMillisecondsSinceEpoch(0),
       notes: json['notes'],
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'event_id': eventId,
+      'grille_code': grilleCode,
+      'filter_number': filterNumber,
+      'payroll_code': payrollCode,
+      'occurred_at_ts': occurredAt.toIso8601String(),
+      'notes': notes,
+    };
   }
 }
 
@@ -242,4 +337,3 @@ class RejillaModel {
     }
   }
 }
-

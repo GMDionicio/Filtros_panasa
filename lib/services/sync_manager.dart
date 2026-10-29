@@ -9,6 +9,9 @@ class SyncManager {
   final RemoteDataSource remoteDataSource;
   final Connectivity _connectivity;
 
+  final StreamController<void> _syncStreamController = StreamController<void>.broadcast();
+  Stream<void> get onSyncCompleted => _syncStreamController.stream;
+
   StreamSubscription<List<ConnectivityResult>>? _subscription;
   bool _isSyncing = false;
 
@@ -41,6 +44,7 @@ class SyncManager {
     if (_isSyncing) return;
 
     _isSyncing = true;
+    int syncedCount = 0;
     try {
       final pending = await localDataSource.getPendingEvents();
       if (pending.isEmpty) {
@@ -52,6 +56,7 @@ class SyncManager {
         final success = await remoteDataSource.syncPendingEvent(item);
         if (success) {
           await localDataSource.deletePendingEvent(item['id']);
+          syncedCount++;
           debugPrint('SyncManager: Evento offline ${item['id']} sincronizado con éxito.');
         }
       }
@@ -59,10 +64,14 @@ class SyncManager {
       debugPrint('SyncManager error al sincronizar eventos offline: $e');
     } finally {
       _isSyncing = false;
+      if (syncedCount > 0 && !_syncStreamController.isClosed) {
+        _syncStreamController.add(null);
+      }
     }
   }
 
   void dispose() {
     _subscription?.cancel();
+    _syncStreamController.close();
   }
 }

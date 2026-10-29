@@ -80,8 +80,8 @@ class ApiService {
     return await getIt<IAuthRepository>().checkHealth();
   }
 
-  static Future<bool> seedDatabase() async {
-    return await getIt<IGrilleRepository>().seedDatabase();
+  static Future<bool> seedDatabase(String adminPin) async {
+    return await getIt<IGrilleRepository>().seedDatabase(adminPin);
   }
 
   static Future<void> syncPendingEvents() async {

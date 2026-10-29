@@ -32,6 +32,13 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
     _fetchEmployees();
   }
 
+  @override
+  void dispose() {
+    _codeController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
   Future<void> _checkSession() async {
     final active = await LocalDbService.getActiveOperator();
     if (mounted) {
@@ -42,6 +49,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
   Future<void> _fetchEmployees() async {
     setState(() => _isLoading = true);
     final list = await _employeeRepository.getEmployees();
+    if (!mounted) return;
     setState(() {
       _employees = list;
       _isLoading = false;
@@ -80,42 +88,6 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
             backgroundColor: Colors.red,
           ),
         );
-      }
-    }
-  }
-
-  Future<void> _deleteEmployee(String payrollCode) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirmar eliminación'),
-        content: Text('¿Desea eliminar al operario $payrollCode?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Eliminar', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      final success = await _employeeRepository.deleteEmployee(payrollCode);
-      if (success) {
-        _fetchEmployees();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Operario eliminado correctamente.'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
       }
     }
   }
@@ -271,12 +243,11 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                                   'Código Nómina: ${emp.payrollCode}',
                                   style: const TextStyle(color: Colors.white70),
                                 ),
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.delete_outline,
-                                      color: Colors.redAccent, size: 20),
-                                  tooltip: 'Eliminar operario',
-                                  onPressed: () =>
-                                      _deleteEmployee(emp.payrollCode),
+                                trailing: const Tooltip(
+                                  message:
+                                      'Baja de usuarios reservada a Administradores en Configuración & Servidor',
+                                  child: Icon(Icons.lock_outline,
+                                      color: Colors.white38, size: 20),
                                 ),
                               ),
                             );

@@ -2,8 +2,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'blocs/grille_cubit.dart';
+import 'di/service_locator.dart';
 import 'models/models.dart';
 import 'painters/edificio_3d_painter.dart';
+import 'repositories/employee_repository.dart';
 import 'screens/maintenance_dialog.dart';
 import 'services/api_service.dart';
 import 'services/local_db_service.dart';
@@ -56,15 +58,18 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
     final status = await ApiService.checkSystemStatus(deviceId: deviceId);
     if (!mounted) return;
 
-    // 2. Si el producto NO está activado, exigir activación por Licencia + PIN Admin
-    bool isActivated = status?['isActivated'] == true;
+    final localEmps = await getIt<IEmployeeRepository>().getEmployees();
+    if (!mounted) return;
+
+    // 2. Si el producto NO está activado y no existen operarios/datos locales, exigir activación por Licencia + PIN Admin
+    bool isActivated = status?['isActivated'] == true || localEmps.isNotEmpty;
     while (!isActivated && mounted) {
       isActivated = await ProductActivationDialog.show(context, deviceId: deviceId);
     }
     if (!mounted) return;
 
     // 3. Si no existen operarios creados en el sistema, ejecutar Onboarding / Configuración Inicial
-    bool hasEmployees = status?['hasEmployees'] == true;
+    bool hasEmployees = status?['hasEmployees'] == true || localEmps.isNotEmpty;
     if (!hasEmployees && mounted) {
       final setupResult = await InitialSetupDialog.show(context);
       if (setupResult != null && mounted) {
@@ -287,12 +292,38 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
 
   Future<void> _openMaintenanceDialog(RejillaModel r) async {
     if (r.liveGrille == null) return;
-    final result = await showDialog<bool>(
+    final result = await showDialog<dynamic>(
       context: context,
       builder: (context) => MaintenanceDialog(grille: r.liveGrille!),
     );
 
-    if (result == true) {
+    if (result is MaintenanceResult) {
+      if (result.isFullSuccess || result.isPartialSuccess) {
+        if (mounted) {
+          context.read<GrilleCubit>().loadGrilles();
+
+          if (result.isFullSuccess) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '✅ Mantenimiento registrado correctamente en ${result.successfulFilters.length} filtro(s).',
+                ),
+                backgroundColor: Colors.green,
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '⚠️ Mantenimiento registrado parcialmente (Exitosos: #${result.successfulFilters.join(", ")}; Fallaron: #${result.failedFilters.join(", ")}).',
+                ),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      }
+    } else if (result == true) {
       if (mounted) {
         context.read<GrilleCubit>().loadGrilles();
         ScaffoldMessenger.of(context).showSnackBar(

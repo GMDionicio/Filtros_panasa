@@ -361,23 +361,24 @@ async function seedInitialData() {
 }
 
 // ==================== WORKER DE SINCRONIZACIÓN EN SEGUNDO PLANO ====================
-
-function initOutboxWorker() {
-  const INTERVAL_MS = parseInt(process.env.SYNC_INTERVAL_MS || '15000', 10);
-  const CENTRAL_URL = process.env.CENTRAL_SERVER_URL || null;
-
-  setInterval(async () => {
-    try {
-      if (CENTRAL_URL) {
-        await processOutboxQueue(CENTRAL_URL);
-      }
-    } catch (err) {
-      console.error('[OutboxWorker] Error en barrido:', err.message);
-    }
-  }, INTERVAL_MS);
-
-  console.log(`[OutboxWorker] Servicio de sincronización activo (Intervalo: ${INTERVAL_MS / 1000}s)`);
-}
+// DESACTIVADO: edge M73 es SSOT (fuente única de verdad), no hay servidor central
+// El outbox se mantiene solo como registro histórico (status='ack') sin reenvío
+// function initOutboxWorker() {
+//   const INTERVAL_MS = parseInt(process.env.SYNC_INTERVAL_MS || '15000', 10);
+//   const CENTRAL_URL = process.env.CENTRAL_SERVER_URL || null;
+//
+//   setInterval(async () => {
+//     try {
+//       if (CENTRAL_URL) {
+//         await processOutboxQueue(CENTRAL_URL);
+//       }
+//     } catch (err) {
+//       console.error('[OutboxWorker] Error en barrido:', err.message);
+//     }
+//   }, INTERVAL_MS);
+//
+//   console.log(`[OutboxWorker] Servicio de sincronización activo (Intervalo: ${INTERVAL_MS / 1000}s)`);
+// }
 
 async function processOutboxQueue(centralUrl) {
   if (!centralUrl) return { processed: 0 };
@@ -553,10 +554,6 @@ app.get('/api/system/status/:deviceId', async (req, res, next) => {
       const diffMs = expDate.getTime() - Date.now();
       daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
       isActivated = diffMs > 0;
-    }
-        const diffMs = expDate.getTime() - Date.now();
-        daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-      }
     }
 
     res.json({
@@ -1059,7 +1056,7 @@ app.post('/api/events', async (req, res, next) => {
       await dbRun(
         `INSERT INTO filter_events
          (id, event_id, grille_code, filter_number, payroll_code, occurred_at_ts, device_installation_id, notes, server_received_at_ts, synced, created_at_ts)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)`,
         [id, eventId, grilleCode, Number(filterNumber), payrollCode, occurredAt, deviceInstallationId || null, notes || null, serverReceivedAt]
       );
 

@@ -26,6 +26,112 @@ class GrilleRepositoryImpl implements IGrilleRepository {
 
   @override
   Future<List<Grille>> getGrilles() async {
+    // Intentar sync/download (endpoint unificado FP-SYNC-04)
+    final syncData = await remoteDataSource.downloadSync();
+
+    if (syncData != null) {
+      final List rawEvents = syncData['events'] ?? [];
+      final List rawGrillesStatus = syncData['grilles_status'] ?? [];
+
+      // Construir mapa grille_code -> lista de filtros con su estado
+      Map<String, List<Map<String, dynamic>>> grilleFiltersMap = {};
+      for (var gs in rawGrillesStatus) {
+        final gCode = gs['grille_code'] as String? ?? '';
+        grilleFiltersMap.putIfAbsent(gCode, () => []);
+        grilleFiltersMap[gCode]!.add(gs);
+      }
+
+      List<Grille> grilles = [];
+      for (var gCode in grilleFiltersMap.keys) {
+        final filtersList = grilleFiltersMap[gCode]!;
+        if (filtersList.isEmpty) continue;
+
+        final firstFilter = filtersList.first;
+        final name = firstFilter['name'] ?? 'Rejilla $gCode';
+        final position = (firstFilter['position'] ?? 0) as int;
+
+        List<FilterItem> filterItems = [];
+        for (var f in filtersList) {
+          final fNum = (f['filter_number'] ?? 1) as int;
+          final positionLabel = f['position_label'] as String? ?? '';
+          final lastReplacement = f['last_replacement'];
+          final daysSince = (f['days_since_replacement'] ?? 30) as int;
+
+          // Buscar evento más reciente para este grille+filter
+          FilterEvent? latestEvent;
+          for (var e in rawEvents) {
+            if ((e['grille_code'] ?? e['grilleCode']) == gCode &&
+                (e['filter_number'] ?? e['filterNumber']) == fNum) {
+              final ev = FilterEvent.fromJson(e);
+              if (latestEvent == null || ev.occurredAt.isAfter(latestEvent.occurredAt)) {
+                latestEvent = ev;
+              }
+            }
+          }
+
+          filterItems.add(FilterItem(
+            id: '${gCode}_$fNum',
+            grilleCode: gCode,
+            filterNumber: fNum,
+            positionLabel: positionLabel.isNotEmpty ? positionLabel : BusinessRules.filterPositions[fNum - 1],
+            lastReplacedAt: latestEvent?.occurredAt,
+            lastEmployeeCode: latestEvent?.payrollCode,
+          ));
+        }
+
+        grilles.add(Grille(
+          code: gCode,
+          name: name,
+          position: position,
+          filters: filterItems,
+        ));
+      }
+
+      // Ordenar por posición
+      grilles.sort((a, b) => a.position.compareTo(b.position));
+
+      // Fusionar eventos pendientes locales
+      final pendingList = await localDataSource.getPendingEvents();
+      if (pendingList.isNotEmpty) {
+        for (var p in pendingList) {
+          final gCode = p['grille_code'] as String?;
+          final fNum = p['filter_number'] as int?;
+          final empCode = p['payroll_code'] as String?;
+          final occAtStr = p['occurred_at'] as String?;
+
+          if (gCode != null && fNum != null && occAtStr != null) {
+            final occAt = DateTime.tryParse(occAtStr);
+            final gIndex = grilles.indexWhere((g) => g.code == gCode);
+            if (gIndex != -1) {
+              final fIndex = grilles[gIndex].filters.indexWhere((f) => f.filterNumber == fNum);
+              if (fIndex != -1) {
+                final currentFilter = grilles[gIndex].filters[fIndex];
+                if (occAt != null &&
+                    (currentFilter.lastReplacedAt == null ||
+                        occAt.isAfter(currentFilter.lastReplacedAt!))) {
+                  grilles[gIndex].filters[fIndex] = FilterItem(
+                    id: currentFilter.id,
+                    grilleCode: currentFilter.grilleCode,
+                    filterNumber: currentFilter.filterNumber,
+                    positionLabel: currentFilter.positionLabel,
+                    lastReplacedAt: occAt,
+                    lastEmployeeCode: empCode,
+                    lastEmployeeName: currentFilter.lastEmployeeName,
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (grilles.isNotEmpty) {
+        await localDataSource.saveGrilles(grilles);
+        return grilles;
+      }
+    }
+
+    // Fallback: fetchGrillesAndEvents (vías antiguas GET /api/grilles + /api/events)
     final remoteData = await remoteDataSource.fetchGrillesAndEvents();
 
     if (remoteData != null) {

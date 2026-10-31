@@ -33,6 +33,10 @@ abstract class RemoteDataSource {
   Future<bool> seedBackendDatabase(String adminPin);
   Future<bool> syncPendingEvent(Map<String, dynamic> item);
   Future<Map<String, dynamic>?> fetchGrillesAndEvents();
+  /// Descarga incremental de eventos + grilles_status vía POST /api/sync/download.
+  /// [since] es un ISO-8601 opcional; si se omite el backend usa last_download.
+  /// Retorna Map con claves: events, grilles_status, cutoff_used, downloaded_at.
+  Future<Map<String, dynamic>?> downloadSync({String? since});
   Future<bool> registerEvent({
     required String grilleCode,
     required int filterNumber,
@@ -388,6 +392,49 @@ class RemoteDataSourceImpl implements RemoteDataSource {
       };
     } catch (e) {
       debugPrint('Error de comunicación con servidor online: $e');
+      return null;
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>?> downloadSync({String? since}) async {
+    await initBaseUrl();
+    try {
+      final headers = await getAuthHeaders();
+      headers['Content-Type'] = 'application/json';
+
+      final body = <String, dynamic>{};
+      if (since != null && since.isNotEmpty) {
+        body['since'] = since;
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/api/sync/download'),
+            headers: headers,
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 12));
+
+      if (response.statusCode != 200) {
+        debugPrint('sync/download error: HTTP ${response.statusCode}');
+        return null;
+      }
+
+      final data = jsonDecode(response.body);
+      if (data['success'] != true) {
+        debugPrint('sync/download response success=false: ${data['message']}');
+        return null;
+      }
+
+      return {
+        'events': data['events'] ?? [],
+        'grilles_status': data['grilles_status'] ?? [],
+        'cutoff_used': data['cutoff_used'],
+        'downloaded_at': data['downloaded_at'],
+      };
+    } catch (e) {
+      debugPrint('Error en sync/download: $e');
       return null;
     }
   }

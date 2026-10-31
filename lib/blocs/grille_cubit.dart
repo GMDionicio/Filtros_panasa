@@ -78,6 +78,11 @@ class GrilleCubit extends Cubit<GrilleState> {
         isConnected: isHealthOk,
         pendingCount: pendingList.length,
       ));
+
+      // FP-SYNC-05: descargar eventos incrementales en background cuando hay conexión
+      if (isHealthOk) {
+        syncManager.downloadSync();
+      }
     } catch (e) {
       final cached = await localDataSource.loadCachedGrilles();
       final pendingList = await localDataSource.getPendingEvents();
@@ -91,6 +96,11 @@ class GrilleCubit extends Cubit<GrilleState> {
 
   Future<void> syncPendingBatch() async {
     await syncManager.syncPendingEvents();
+  }
+
+  /// Descarga forzada de eventos + grilles_status (FP-SYNC-05)
+  Future<void> downloadSync({bool force = false}) async {
+    await syncManager.downloadSync(force: force);
   }
 
   Future<bool> seedDatabase(String adminPin) async {

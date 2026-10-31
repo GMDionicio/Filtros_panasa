@@ -53,11 +53,9 @@ class RemoteDataSourceImpl implements RemoteDataSource {
   final LocalDataSource localDataSource;
 
   static String get defaultBaseUrl {
-    if (kIsWeb &&
-        Uri.base.origin.startsWith('http') &&
-        !Uri.base.origin.contains('localhost')) {
-      return Uri.base.origin;
-    }
+    // La API vive siempre en panasa.gmnodo.com, tanto en Android como en web.
+    // En web NO debe usarse Uri.base.origin: apunta al dominio estático
+    // filtros-tiroforzados.gmnodo.com, donde nginx no proxya /api/* al backend.
     return 'https://panasa.gmnodo.com';
   }
   String _baseUrl = defaultBaseUrl;

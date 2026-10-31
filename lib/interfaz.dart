@@ -465,10 +465,10 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
                   final badgeText = _isConnected
                       ? (pendingCount > 0
                           ? 'Sincronizando ($pendingCount)'
-                          : 'API Local')
+                          : 'Servidor Online')
                       : (pendingCount > 0
-                          ? 'Modo Local ($pendingCount pend.)'
-                          : 'Modo Local');
+                          ? 'Modo Offline ($pendingCount pend.)'
+                          : 'Modo Offline');
 
                   return Row(
                     mainAxisSize: MainAxisSize.min,

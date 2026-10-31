@@ -278,10 +278,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         isConnected
                             ? (pendingCount > 0
                                 ? 'Sincronizando ($pendingCount)'
-                                : 'API Local')
+                                : 'Servidor Online')
                             : (pendingCount > 0
-                                ? 'Modo Local ($pendingCount pend.)'
-                                : 'Modo Local'),
+                                ? 'Modo Offline ($pendingCount pend.)'
+                                : 'Modo Offline'),
                         style: const TextStyle(
                             fontSize: 12,
                             color: Colors.white,

@@ -303,13 +303,24 @@ class RemoteDataSourceImpl implements RemoteDataSource {
     await initBaseUrl();
     try {
       final response = await http
-          .get(Uri.parse('$_baseUrl/health'))
+          .get(Uri.parse('$_baseUrl/api/health'))
           .timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return data['status'] == 'ok';
       }
     } catch (_) {}
+
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/health'))
+          .timeout(const Duration(seconds: 4));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['status'] == 'ok';
+      }
+    } catch (_) {}
+
     return false;
   }
 

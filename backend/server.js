@@ -507,7 +507,7 @@ async function requireAuth(req, res, next) {
 // ==================== RUTAS Y ENDPOINTS DE LA API ====================
 
 // Health Check con verificación real de Base de Datos (Público)
-app.get('/health', async (req, res) => {
+app.get(['/health', '/api/health'], async (req, res) => {
   try {
     const dbTest = await dbQueryGet(`SELECT 1 as alive`);
     res.json({

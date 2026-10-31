@@ -166,11 +166,14 @@ class RemoteDataSourceImpl implements RemoteDataSource {
       if (response.statusCode == 200 && data['success'] == true) {
         return data;
       }
+      // El servidor respondió (rechazo: PIN o clave inválidos, etc.)
       return {'success': false, 'message': data['message'] ?? 'Error activando producto'};
     } catch (e) {
-      debugPrint('Error al activar producto: $e');
+      // Error de conexión o respuesta no-JSON → servidor inalcanzable.
+      // Devolver null para que el repositorio active el fallback offline por PIN.
+      debugPrint('Error al activar producto (sin conexión al servidor): $e');
+      return null;
     }
-    return {'success': false, 'message': 'Error de conexión con el servidor de licencias'};
   }
 
   @override

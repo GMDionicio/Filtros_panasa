@@ -1,6 +1,15 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+
 import '../datasources/local_data_source.dart';
 import '../datasources/remote_data_source.dart';
 import '../models/models.dart';
+
+/// Hash del PIN de administrador para validación offline.
+/// No es el hash bcrypt del servidor; es una referencia local derivada al activar online.
+String _hashAdminPin(String pin) =>
+    sha256.convert(utf8.encode('panasa-admin-pin:$pin')).toString();
 
 abstract class IAuthRepository {
   Future<Map<String, dynamic>?> checkSystemStatus({required String deviceId});
@@ -106,16 +115,18 @@ class AuthRepositoryImpl implements IAuthRepository {
 
     if (res != null && res['success'] == true) {
       await localDataSource.saveSetting('is_activated', 'true');
+      // Guardar hash del PIN para validación offline en activaciones posteriores.
+      await localDataSource.saveSetting('admin_pin_hash', _hashAdminPin(adminPin));
       if (licenseKey.isNotEmpty) {
         await localDataSource.saveSetting('license_key', licenseKey);
       }
       return res;
     }
 
-    // Fallback Offline: Si no se pudo contactar al servidor, pero se provee un PIN válido
+    // Fallback Offline: servidor inalcanzable (res == null) → validar PIN localmente.
     if (res == null) {
       final isPinValid = await validateAdminPin(adminPin);
-      if (isPinValid || adminPin == '1234' || adminPin == '0000') {
+      if (isPinValid) {
         await localDataSource.saveSetting('is_activated', 'true');
         if (licenseKey.isNotEmpty) {
           await localDataSource.saveSetting('license_key', licenseKey);
@@ -195,10 +206,13 @@ class AuthRepositoryImpl implements IAuthRepository {
 
   @override
   Future<bool> validateAdminPin(String pin) async {
-    final remoteVal = await remoteDataSource.validateAdminPin(pin);
-    if (remoteVal) return true;
-    // Fallback Offline
-    return pin == '1234' || pin == '0000';
+    // Validación local (hash guardado al activar online): funciona sin conexión.
+    final storedHash = await localDataSource.getSetting('admin_pin_hash');
+    if (storedHash != null && storedHash.isNotEmpty) {
+      return storedHash == _hashAdminPin(pin);
+    }
+    // Sin hash local (nunca activado online): validar contra el servidor.
+    return await remoteDataSource.validateAdminPin(pin);
   }
 
   @override

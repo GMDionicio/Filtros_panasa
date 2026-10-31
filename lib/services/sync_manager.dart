@@ -23,8 +23,6 @@ class SyncManager {
 
   /// Inicializa la escucha de cambios de conectividad para sincronización automática offline -> online
   void initConnectivityListener() {
-    if (kIsWeb) return;
-
     _subscription?.cancel();
     _subscription = _connectivity.onConnectivityChanged.listen((results) {
       final hasConnection = results.any((r) =>
@@ -38,9 +36,8 @@ class SyncManager {
     });
   }
 
-  /// Ejecuta la sincronización de eventos pendientes
+  /// Ejecuta la sincronización de eventos pendientes en Android y Web
   Future<void> syncPendingEvents() async {
-    if (kIsWeb) return;
     if (_isSyncing) return;
 
     _isSyncing = true;
@@ -48,7 +45,6 @@ class SyncManager {
     try {
       final pending = await localDataSource.getPendingEvents();
       if (pending.isEmpty) {
-        _isSyncing = false;
         return;
       }
 

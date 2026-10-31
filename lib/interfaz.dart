@@ -54,21 +54,21 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
   Future<void> _checkOperatorLogin() async {
     final deviceId = await LocalDbService.getOrCreateDeviceId();
 
-    // 1. Consultar estado general del sistema (licencia y empleados)
+    // 1. Consultar estado general del sistema (remoto y local)
     final status = await ApiService.checkSystemStatus(deviceId: deviceId);
     if (!mounted) return;
 
     final localEmps = await getIt<IEmployeeRepository>().getEmployees();
     if (!mounted) return;
 
-    // 2. Si el producto NO está activado y no existen operarios/datos locales, exigir activación por Licencia + PIN Admin
+    // 2. Si el producto NO está activado y no hay datos locales previa activación, exigir activación
     bool isActivated = status?['isActivated'] == true || localEmps.isNotEmpty;
     while (!isActivated && mounted) {
       isActivated = await ProductActivationDialog.show(context, deviceId: deviceId);
     }
     if (!mounted) return;
 
-    // 3. Si no existen operarios creados en el sistema, ejecutar Onboarding / Configuración Inicial
+    // 3. Si no existen operarios creados en el sistema, ejecutar Configuración Inicial
     bool hasEmployees = status?['hasEmployees'] == true || localEmps.isNotEmpty;
     if (!hasEmployees && mounted) {
       final setupResult = await InitialSetupDialog.show(context);
@@ -80,20 +80,66 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
     }
     if (!mounted) return;
 
-    // 4. Verificar sesión guardada localmente (permanente hasta borrar caché o cerrar sesión)
-    final active = await LocalDbService.getActiveOperator();
-    if (mounted) {
-      if (active != null) {
-        setState(() => _activeOperator = active);
-      } else {
-        Map<String, String>? result;
-        while (result == null && mounted) {
-          result = await OperatorLoginDialog.show(context, canDismiss: false);
+    // 4. Verificar sesión guardada localmente y validar token contra el servidor si está online
+    Map<String, String>? active = await LocalDbService.getActiveOperator();
+    if (active != null) {
+      final hasToken = active['token'] != null && active['token']!.isNotEmpty;
+      if (!hasToken && status != null) {
+        // Sesión antigua sin Bearer token: re-autenticar para obtener token del servidor
+        final loginData = await ApiService.loginOperator(
+          payrollCode: active['code']!,
+          deviceId: deviceId,
+        );
+        if (loginData != null && loginData['token'] != null) {
+          await LocalDbService.saveActiveOperator(
+            active['code']!,
+            loginData['name'] ?? active['name']!,
+            token: loginData['token'],
+          );
+          active = await LocalDbService.getActiveOperator();
+        } else {
+          await LocalDbService.clearActiveOperator();
+          active = null;
         }
-        if (result != null && mounted) {
-          setState(() => _activeOperator = result);
+      } else if (hasToken && status != null) {
+        final sessionCheck = await ApiService.checkOperatorSession(deviceId: deviceId);
+        if (sessionCheck == null || sessionCheck['active'] != true) {
+          // Intentar renovar sesión automáticamente con el código de nómina actual
+          final renewed = await ApiService.loginOperator(
+            payrollCode: active['code']!,
+            deviceId: deviceId,
+          );
+          if (renewed != null && renewed['token'] != null) {
+            await LocalDbService.saveActiveOperator(
+              active['code']!,
+              renewed['name'] ?? active['name']!,
+              token: renewed['token'],
+            );
+            active = await LocalDbService.getActiveOperator();
+          } else {
+            await LocalDbService.clearActiveOperator();
+            active = null;
+          }
         }
       }
+    }
+
+    if (!mounted) return;
+
+    if (active != null) {
+      setState(() => _activeOperator = active);
+    } else {
+      Map<String, String>? result;
+      while (result == null && mounted) {
+        result = await OperatorLoginDialog.show(context, canDismiss: false);
+      }
+      if (result != null && mounted) {
+        setState(() => _activeOperator = result);
+      }
+    }
+
+    if (mounted && _activeOperator != null) {
+      context.read<GrilleCubit>().loadGrilles();
     }
   }
 
@@ -102,6 +148,7 @@ class _FachadaRejillas3DScreenState extends State<FachadaRejillas3DScreen> {
     final result = await OperatorLoginDialog.show(context, canDismiss: canDismiss);
     if (result != null && mounted) {
       setState(() => _activeOperator = result);
+      context.read<GrilleCubit>().loadGrilles();
     }
   }
 

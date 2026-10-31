@@ -48,7 +48,14 @@ abstract class RemoteDataSource {
 class RemoteDataSourceImpl implements RemoteDataSource {
   final LocalDataSource localDataSource;
 
-  static const String defaultBaseUrl = 'https://panasa.gmnodo.com';
+  static String get defaultBaseUrl {
+    if (kIsWeb &&
+        Uri.base.origin.startsWith('http') &&
+        !Uri.base.origin.contains('localhost')) {
+      return Uri.base.origin;
+    }
+    return 'https://panasa.gmnodo.com';
+  }
   String _baseUrl = defaultBaseUrl;
   bool _initialized = false;
 
@@ -359,27 +366,25 @@ class RemoteDataSourceImpl implements RemoteDataSource {
     await initBaseUrl();
     try {
       final headers = await getAuthHeaders();
-      final response = await http
-          .get(Uri.parse('$_baseUrl/api/grilles'), headers: headers)
-          .timeout(const Duration(seconds: 8));
+      final results = await Future.wait([
+        http.get(Uri.parse('$_baseUrl/api/grilles'), headers: headers).timeout(const Duration(seconds: 8)),
+        http.get(Uri.parse('$_baseUrl/api/events'), headers: headers).timeout(const Duration(seconds: 8)),
+      ]);
 
-      if (response.statusCode != 200) return null;
+      final grillesResponse = results[0];
+      final eventsResponse = results[1];
 
-      final grillesData = jsonDecode(response.body);
+      // Si cualquiera de las dos peticiones falla o da 401, retornamos null para conservar la caché local intacta
+      if (grillesResponse.statusCode != 200 || eventsResponse.statusCode != 200) {
+        return null;
+      }
 
-      Map<String, dynamic> latestEvents = {};
-      try {
-        final eventsResponse = await http
-            .get(Uri.parse('$_baseUrl/api/events'), headers: headers)
-            .timeout(const Duration(seconds: 8));
-        if (eventsResponse.statusCode == 200) {
-          latestEvents = jsonDecode(eventsResponse.body);
-        }
-      } catch (_) {}
+      final grillesData = jsonDecode(grillesResponse.body);
+      final eventsData = jsonDecode(eventsResponse.body);
 
       return {
         'grilles': grillesData['grilles'] ?? [],
-        'events': latestEvents['events'] ?? [],
+        'events': eventsData['events'] ?? [],
       };
     } catch (e) {
       debugPrint('Error de comunicación con servidor online: $e');
@@ -395,7 +400,7 @@ class RemoteDataSourceImpl implements RemoteDataSource {
     String? notes,
   }) async {
     await initBaseUrl();
-    final now = DateTime.now();
+    final now = DateTime.now().toUtc();
     try {
       final headers = await getAuthHeaders();
       final deviceId = await localDataSource.getOrCreateDeviceId();

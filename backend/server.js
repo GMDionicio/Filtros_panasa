@@ -572,7 +572,7 @@ app.get('/api/system/status/:deviceId', async (req, res, next) => {
 
 app.post('/api/system/setup', async (req, res, next) => {
   try {
-    const { adminPin, initialEmployeeCode, initialEmployeeName } = req.body;
+    const { adminPin, initialEmployeeCode, initialEmployeeName, deviceId, deviceName } = req.body;
 
     // 1. Validar PIN de administrador
     if (!adminPin) {
@@ -590,19 +590,35 @@ app.post('/api/system/setup', async (req, res, next) => {
       await seedInitialData();
     }
 
-    // 3. Registrar primer empleado
+    // 3. Registrar primer empleado y crear su sesión activa
     const code = String(initialEmployeeCode || 'EMP-001').trim().toUpperCase();
     const name = String(initialEmployeeName || 'Operario Principal').trim();
+    const cleanDeviceId = deviceId ? String(deviceId).trim() : (req.headers['x-device-id'] || 'SETUP-DEVICE');
+    const token = uuidv4();
+    const sessionId = uuidv4();
 
-    await dbRun(
-      `INSERT INTO employees (payroll_code, name, active, created_at_ts)
-       VALUES (?, ?, 1, CURRENT_TIMESTAMP)
-       ON CONFLICT(payroll_code) DO UPDATE SET name = excluded.name, active = 1`,
-      [code, name]
-    );
+    await dbExecTransaction(async () => {
+      await dbRun(
+        `INSERT INTO employees (payroll_code, name, active, created_at_ts)
+         VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+         ON CONFLICT(payroll_code) DO UPDATE SET name = excluded.name, active = 1`,
+        [code, name]
+      );
+
+      await dbRun(`UPDATE operator_sessions SET active = 0 WHERE device_id = ?`, [cleanDeviceId]);
+
+      await dbRun(
+        `INSERT INTO operator_sessions (id, payroll_code, device_id, device_name, token, active, logged_in_at_ts, last_active_at_ts)
+         VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [sessionId, code, cleanDeviceId, deviceName || 'Dispositivo Inicial', token]
+      );
+    });
 
     res.json({
       success: true,
+      authenticated: true,
+      token,
+      sessionId,
       payrollCode: code,
       name,
       message: 'Configuración inicial completada exitosamente'
@@ -1230,10 +1246,12 @@ app.post('/api/sync/outbox/process', async (req, res, next) => {
 
 app.post('/api/sync/download', async (req, res, next) => {
   try {
-    const { since } = req.body;
+    const { since, deviceId } = req.body;
+    const cleanDeviceId = deviceId || req.headers['x-device-id'] || 'global';
+    const cursorKey = `last_download_${cleanDeviceId}`;
 
-    // Cursor de la última descarga (fallback: hace 30 días para primer sync)
-    const cursorRow = await dbQueryGet(`SELECT value FROM sync_cursor WHERE key = 'last_download'`);
+    // Cursor de la última descarga de este dispositivo (fallback: hace 30 días para primer sync)
+    const cursorRow = await dbQueryGet(`SELECT value FROM sync_cursor WHERE key = ?`, [cursorKey]);
     const lastDownload = cursorRow ? cursorRow.value : null;
 
     // Determinar el punto de corte: más reciente entre since y last_download
@@ -1254,21 +1272,20 @@ app.post('/api/sync/download', async (req, res, next) => {
       [cutoff]
     );
 
-    // Status de semáforos (reutiliza la misma lógica que GET /api/grilles/status)
+    // Status de semáforos corrigiendo el estado cuando nunca ha sido reemplazado (NULL -> 'urgent')
     const grillesWithStatus = await dbQueryAll(`
       SELECT g.grille_code, g.name, g.position,
              f.filter_number, f.position as position_label,
              COALESCE(latest.max_occurred_at_ts, '1970-01-01T00:00:00.000Z') as last_replacement,
              CASE
                WHEN latest.max_occurred_at_ts IS NOT NULL
-                 THEN CAST((julianday('now') - julianday(latest.max_occurred_at_ts)) AS INTEGER)
+                 THEN MAX(0, CAST((julianday('now') - julianday(latest.max_occurred_at_ts)) AS INTEGER))
                ELSE 30
              END as days_since_replacement,
              CASE
-               WHEN latest.max_occurred_at_ts IS NOT NULL
-                 AND (julianday('now') - julianday(latest.max_occurred_at_ts)) >= 20 THEN 'urgent'
-               WHEN latest.max_occurred_at_ts IS NOT NULL
-                 AND (julianday('now') - julianday(latest.max_occurred_at_ts)) >= 15 THEN 'warning'
+               WHEN latest.max_occurred_at_ts IS NULL THEN 'urgent'
+               WHEN (julianday('now') - julianday(latest.max_occurred_at_ts)) >= 20 THEN 'urgent'
+               WHEN (julianday('now') - julianday(latest.max_occurred_at_ts)) >= 15 THEN 'warning'
                ELSE 'ok'
              END as status
       FROM filters f
@@ -1281,10 +1298,10 @@ app.post('/api/sync/download', async (req, res, next) => {
       ORDER BY g.position, f.filter_number
     `);
 
-    // Actualizar cursor de descarga
+    // Actualizar cursor de descarga específico del dispositivo
     await dbRun(
-      `INSERT OR REPLACE INTO sync_cursor (key, value, updated_at_ts) VALUES ('last_download', ?, CURRENT_TIMESTAMP)`,
-      [new Date().toISOString()]
+      `INSERT OR REPLACE INTO sync_cursor (key, value, updated_at_ts) VALUES (?, ?, CURRENT_TIMESTAMP)`,
+      [cursorKey, new Date().toISOString()]
     );
 
     res.json({

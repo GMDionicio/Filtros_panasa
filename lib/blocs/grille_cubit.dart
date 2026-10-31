@@ -68,6 +68,9 @@ class GrilleCubit extends Cubit<GrilleState> {
 
     try {
       final isHealthOk = await authRepository.checkHealth();
+      if (isHealthOk) {
+        await syncManager.syncPendingEvents();
+      }
       final grilles = await grilleRepository.getGrilles();
       final pendingList = await localDataSource.getPendingEvents();
       emit(GrilleLoaded(

@@ -445,7 +445,7 @@ class LocalDataSourceImpl implements LocalDataSource {
       'grille_code': grilleCode,
       'filter_number': filterNumber,
       'payroll_code': payrollCode,
-      'occurred_at': occurredAt.toIso8601String(),
+      'occurred_at': occurredAt.toUtc().toIso8601String(),
       'notes': notes ?? 'Mantenimiento registrado offline',
     };
 
@@ -463,7 +463,8 @@ class LocalDataSourceImpl implements LocalDataSource {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      final currentList = await getPendingEvents();
+      // Clonamos la lista para evitar mutar el QueryResultSet read-only de sqflite
+      final currentList = List<Map<String, dynamic>>.from(await getPendingEvents());
       currentList.removeWhere((item) => item['id'] == id);
       currentList.add(eventMap);
       await prefs.setString('pending_events_data', jsonEncode(currentList));
@@ -522,7 +523,8 @@ class LocalDataSourceImpl implements LocalDataSource {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      final currentList = await getPendingEvents();
+      // Clonamos la lista antes de eliminar elementos
+      final currentList = List<Map<String, dynamic>>.from(await getPendingEvents());
       currentList.removeWhere((item) => item['id'] == id);
       await prefs.setString('pending_events_data', jsonEncode(currentList));
     } catch (e) {

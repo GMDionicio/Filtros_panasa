@@ -30,7 +30,6 @@ class GrilleRepositoryImpl implements IGrilleRepository {
     final syncData = await remoteDataSource.downloadSync();
 
     if (syncData != null) {
-      final List rawEvents = syncData['events'] ?? [];
       final List rawGrillesStatus = syncData['grilles_status'] ?? [];
 
       // Construir mapa grille_code -> lista de filtros con su estado
@@ -55,17 +54,17 @@ class GrilleRepositoryImpl implements IGrilleRepository {
           final fNum = (f['filter_number'] ?? 1) as int;
           final positionLabel = f['position_label'] as String? ?? '';
           final lastReplacement = f['last_replacement'];
-          final daysSince = (f['days_since_replacement'] ?? 30) as int;
+          final empCode = f['last_employee_code'] as String?;
+          final empCodes = parseEmployeeCodes(f['last_employee_codes']);
 
-          // Buscar evento más reciente para este grille+filter
-          FilterEvent? latestEvent;
-          for (var e in rawEvents) {
-            if ((e['grille_code'] ?? e['grilleCode']) == gCode &&
-                (e['filter_number'] ?? e['filterNumber']) == fNum) {
-              final ev = FilterEvent.fromJson(e);
-              if (latestEvent == null || ev.occurredAt.isAfter(latestEvent.occurredAt)) {
-                latestEvent = ev;
-              }
+          // El backend ya calcula el último reemplazo + empleado por filtro (grilles_status).
+          // Usamos esos campos directamente en vez de los eventos incrementales (evita perder
+          // el estado al refrescar, cuando el cursor de sync ya superó el evento reciente).
+          DateTime? lastReplacedAt;
+          if (lastReplacement is String && lastReplacement.isNotEmpty) {
+            final parsed = DateTime.tryParse(lastReplacement);
+            if (parsed != null && parsed.year > 2000) {
+              lastReplacedAt = parsed;
             }
           }
 
@@ -74,9 +73,9 @@ class GrilleRepositoryImpl implements IGrilleRepository {
             grilleCode: gCode,
             filterNumber: fNum,
             positionLabel: positionLabel.isNotEmpty ? positionLabel : BusinessRules.filterPositions[fNum - 1],
-            lastReplacedAt: latestEvent?.occurredAt,
-            lastEmployeeCode: latestEvent?.payrollCode,
-            lastEmployeeCodes: latestEvent?.payrollCodes ?? const [],
+            lastReplacedAt: lastReplacedAt,
+            lastEmployeeCode: empCode,
+            lastEmployeeCodes: empCodes,
           ));
         }
 

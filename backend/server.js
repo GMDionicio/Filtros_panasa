@@ -1289,25 +1289,27 @@ app.post('/api/sync/download', async (req, res, next) => {
     const grillesWithStatus = await dbQueryAll(`
       SELECT g.grille_code, g.name, g.position,
              f.filter_number, f.position as position_label,
-             COALESCE(latest.max_occurred_at_ts, '1970-01-01T00:00:00.000Z') as last_replacement,
+             le.occurred_at_ts as last_replacement,
+             le.payroll_code as last_employee_code,
+             le.payroll_codes as last_employee_codes,
              CASE
-               WHEN latest.max_occurred_at_ts IS NOT NULL
-                 THEN MAX(0, CAST((julianday('now') - julianday(latest.max_occurred_at_ts)) AS INTEGER))
+               WHEN le.occurred_at_ts IS NOT NULL
+                 THEN MAX(0, CAST((julianday('now') - julianday(le.occurred_at_ts)) AS INTEGER))
                ELSE 30
              END as days_since_replacement,
              CASE
-               WHEN latest.max_occurred_at_ts IS NULL THEN 'urgent'
-               WHEN (julianday('now') - julianday(latest.max_occurred_at_ts)) >= 20 THEN 'urgent'
-               WHEN (julianday('now') - julianday(latest.max_occurred_at_ts)) >= 15 THEN 'warning'
+               WHEN le.occurred_at_ts IS NULL THEN 'urgent'
+               WHEN (julianday('now') - julianday(le.occurred_at_ts)) >= 20 THEN 'urgent'
+               WHEN (julianday('now') - julianday(le.occurred_at_ts)) >= 15 THEN 'warning'
                ELSE 'ok'
              END as status
       FROM filters f
       JOIN grilles g ON f.grille_code = g.grille_code
-      LEFT JOIN (
-        SELECT grille_code, filter_number, MAX(occurred_at_ts) as max_occurred_at_ts
-        FROM filter_events
-        GROUP BY grille_code, filter_number
-      ) latest ON f.grille_code = latest.grille_code AND f.filter_number = latest.filter_number
+      LEFT JOIN filter_events le ON le.id = (
+        SELECT fe.id FROM filter_events fe
+        WHERE fe.grille_code = f.grille_code AND fe.filter_number = f.filter_number
+        ORDER BY fe.occurred_at_ts DESC, fe.rowid DESC LIMIT 1
+      )
       ORDER BY g.position, f.filter_number
     `);
 

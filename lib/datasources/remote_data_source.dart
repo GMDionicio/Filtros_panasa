@@ -40,7 +40,7 @@ abstract class RemoteDataSource {
   Future<bool> registerEvent({
     required String grilleCode,
     required int filterNumber,
-    required String payrollCode,
+    required List<String> payrollCodes,
     String? notes,
   });
   Future<List<Employee>?> getEmployees();
@@ -357,6 +357,7 @@ class RemoteDataSourceImpl implements RemoteDataSource {
         'grilleCode': item['grille_code'],
         'filterNumber': item['filter_number'],
         'payrollCode': item['payroll_code'],
+        'payrollCodes': parseEmployeeCodes(item['payroll_codes']),
         'occurredAt': item['occurred_at'],
         'deviceInstallationId': deviceId,
         'notes': item['notes'],
@@ -455,7 +456,7 @@ class RemoteDataSourceImpl implements RemoteDataSource {
   Future<bool> registerEvent({
     required String grilleCode,
     required int filterNumber,
-    required String payrollCode,
+    required List<String> payrollCodes,
     String? notes,
   }) async {
     await initBaseUrl();
@@ -468,7 +469,8 @@ class RemoteDataSourceImpl implements RemoteDataSource {
         'eventId': eventId,
         'grilleCode': grilleCode,
         'filterNumber': filterNumber,
-        'payrollCode': payrollCode,
+        'payrollCode': payrollCodes.isNotEmpty ? payrollCodes.first : '',
+        'payrollCodes': payrollCodes,
         'occurredAt': now.toIso8601String(),
         'deviceInstallationId': deviceId,
         'notes': notes ??

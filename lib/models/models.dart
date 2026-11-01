@@ -1,4 +1,27 @@
+import 'dart:convert';
+
 import '../config/business_rules.dart';
+
+/// Convierte una lista de códigos de nómina desde múltiples representaciones:
+/// Lista Dart, string JSON de array (p.ej. '["34943","35564"]') o string separado por comas.
+List<String> parseEmployeeCodes(dynamic val) {
+  if (val == null) return const [];
+  if (val is List) {
+    return val.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList();
+  }
+  if (val is String) {
+    final s = val.trim();
+    if (s.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(s);
+      if (decoded is List) {
+        return decoded.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList();
+      }
+    } catch (_) {}
+    return s.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+  }
+  return const [];
+}
 
 /// Función auxiliar para el parseo seguro y flexible de fechas (ISO 8601, timestamps en ms/seg o Strings numéricos)
 DateTime? _parseDateTime(dynamic val) {
@@ -133,6 +156,7 @@ class FilterItem {
   final DateTime? lastReplacedAt;
   final String? lastEmployeeCode;
   final String? lastEmployeeName;
+  final List<String> lastEmployeeCodes;
 
   FilterItem({
     required this.id,
@@ -142,6 +166,7 @@ class FilterItem {
     this.lastReplacedAt,
     this.lastEmployeeCode,
     this.lastEmployeeName,
+    this.lastEmployeeCodes = const [],
   });
 
   int get daysSinceReplacement {
@@ -170,6 +195,8 @@ class FilterItem {
           json['last_employee_code'] ?? json['lastEmployeeCode'],
       lastEmployeeName:
           json['last_employee_name'] ?? json['lastEmployeeName'],
+      lastEmployeeCodes:
+          parseEmployeeCodes(json['last_employee_codes'] ?? json['lastEmployeeCodes']),
     );
   }
 
@@ -182,6 +209,7 @@ class FilterItem {
       'last_replaced_at': lastReplacedAt?.toIso8601String(),
       'last_employee_code': lastEmployeeCode,
       'last_employee_name': lastEmployeeName,
+      'last_employee_codes': lastEmployeeCodes,
     };
   }
 }
@@ -224,6 +252,7 @@ class FilterEvent {
   final String grilleCode;
   final int filterNumber;
   final String payrollCode;
+  final List<String> payrollCodes;
   final DateTime occurredAt;
   final String? notes;
 
@@ -233,6 +262,7 @@ class FilterEvent {
     required this.filterNumber,
     required this.payrollCode,
     required this.occurredAt,
+    this.payrollCodes = const [],
     this.notes,
   });
 
@@ -243,11 +273,17 @@ class FilterEvent {
         json['timestamp'];
     final parsedDate = _parseDateTime(rawTs);
 
+    final codes = parseEmployeeCodes(json['payroll_codes'] ?? json['payrollCodes']);
+    final single = json['payroll_code'] ?? json['payrollCode'] ?? '';
+
     return FilterEvent(
       eventId: json['event_id'] ?? json['eventId'] ?? json['id'] ?? '',
       grilleCode: json['grille_code'] ?? json['grilleCode'] ?? '',
       filterNumber: json['filter_number'] ?? json['filterNumber'] ?? 1,
-      payrollCode: json['payroll_code'] ?? json['payrollCode'] ?? '',
+      payrollCode: codes.isNotEmpty ? codes.first : single,
+      payrollCodes: codes.isNotEmpty
+          ? codes
+          : (single is String && single.isNotEmpty ? [single] : const []),
       occurredAt: parsedDate ?? DateTime.fromMillisecondsSinceEpoch(0),
       notes: json['notes'],
     );
@@ -259,6 +295,7 @@ class FilterEvent {
       'grille_code': grilleCode,
       'filter_number': filterNumber,
       'payroll_code': payrollCode,
+      'payroll_codes': payrollCodes,
       'occurred_at_ts': occurredAt.toIso8601String(),
       'notes': notes,
     };

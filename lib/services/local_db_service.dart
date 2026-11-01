@@ -51,14 +51,14 @@ class LocalDbService {
   static Future<void> savePendingEvent({
     required String grilleCode,
     required int filterNumber,
-    required String payrollCode,
+    required List<String> payrollCodes,
     required DateTime occurredAt,
     String? notes,
   }) async {
     await getIt<LocalDataSource>().savePendingEvent(
       grilleCode: grilleCode,
       filterNumber: filterNumber,
-      payrollCode: payrollCode,
+      payrollCodes: payrollCodes,
       occurredAt: occurredAt,
       notes: notes,
     );
@@ -75,13 +75,13 @@ class LocalDbService {
   static Future<void> updateLocalFilterReplacement({
     required String grilleCode,
     required int filterNumber,
-    required String payrollCode,
+    required List<String> payrollCodes,
     required DateTime replacedAt,
   }) async {
     await getIt<LocalDataSource>().updateLocalFilterReplacement(
       grilleCode: grilleCode,
       filterNumber: filterNumber,
-      payrollCode: payrollCode,
+      payrollCodes: payrollCodes,
       replacedAt: replacedAt,
     );
   }

@@ -8,7 +8,7 @@ abstract class IGrilleRepository {
   Future<bool> registerEvent({
     required String grilleCode,
     required int filterNumber,
-    required String payrollCode,
+    required List<String> payrollCodes,
     String? notes,
   });
   Future<bool> seedDatabase(String adminPin);
@@ -76,6 +76,7 @@ class GrilleRepositoryImpl implements IGrilleRepository {
             positionLabel: positionLabel.isNotEmpty ? positionLabel : BusinessRules.filterPositions[fNum - 1],
             lastReplacedAt: latestEvent?.occurredAt,
             lastEmployeeCode: latestEvent?.payrollCode,
+            lastEmployeeCodes: latestEvent?.payrollCodes ?? const [],
           ));
         }
 
@@ -97,6 +98,10 @@ class GrilleRepositoryImpl implements IGrilleRepository {
           final gCode = p['grille_code'] as String?;
           final fNum = p['filter_number'] as int?;
           final empCode = p['payroll_code'] as String?;
+          final empCodes = parseEmployeeCodes(p['payroll_codes']);
+          final codesForFilter = empCodes.isNotEmpty
+              ? empCodes
+              : (empCode != null && empCode.isNotEmpty ? [empCode] : const <String>[]);
           final occAtStr = p['occurred_at'] as String?;
 
           if (gCode != null && fNum != null && occAtStr != null) {
@@ -115,8 +120,9 @@ class GrilleRepositoryImpl implements IGrilleRepository {
                     filterNumber: currentFilter.filterNumber,
                     positionLabel: currentFilter.positionLabel,
                     lastReplacedAt: occAt,
-                    lastEmployeeCode: empCode,
+                    lastEmployeeCode: codesForFilter.isNotEmpty ? codesForFilter.first : empCode,
                     lastEmployeeName: currentFilter.lastEmployeeName,
+                    lastEmployeeCodes: codesForFilter,
                   );
                 }
               }
@@ -164,6 +170,7 @@ class GrilleRepositoryImpl implements IGrilleRepository {
             positionLabel: BusinessRules.filterPositions[j - 1],
             lastReplacedAt: lastEv?.occurredAt,
             lastEmployeeCode: lastEv?.payrollCode,
+            lastEmployeeCodes: lastEv?.payrollCodes ?? const [],
           ));
         }
 
@@ -182,6 +189,10 @@ class GrilleRepositoryImpl implements IGrilleRepository {
           final gCode = p['grille_code'] as String?;
           final fNum = p['filter_number'] as int?;
           final empCode = p['payroll_code'] as String?;
+          final empCodes = parseEmployeeCodes(p['payroll_codes']);
+          final codesForFilter = empCodes.isNotEmpty
+              ? empCodes
+              : (empCode != null && empCode.isNotEmpty ? [empCode] : const <String>[]);
           final occAtStr = p['occurred_at'] as String?;
 
           if (gCode != null && fNum != null && occAtStr != null) {
@@ -200,8 +211,9 @@ class GrilleRepositoryImpl implements IGrilleRepository {
                     filterNumber: currentFilter.filterNumber,
                     positionLabel: currentFilter.positionLabel,
                     lastReplacedAt: occAt,
-                    lastEmployeeCode: empCode,
+                    lastEmployeeCode: codesForFilter.isNotEmpty ? codesForFilter.first : empCode,
                     lastEmployeeName: currentFilter.lastEmployeeName,
+                    lastEmployeeCodes: codesForFilter,
                   );
                 }
               }
@@ -231,14 +243,14 @@ class GrilleRepositoryImpl implements IGrilleRepository {
   Future<bool> registerEvent({
     required String grilleCode,
     required int filterNumber,
-    required String payrollCode,
+    required List<String> payrollCodes,
     String? notes,
   }) async {
     final now = DateTime.now();
     final remoteSuccess = await remoteDataSource.registerEvent(
       grilleCode: grilleCode,
       filterNumber: filterNumber,
-      payrollCode: payrollCode,
+      payrollCodes: payrollCodes,
       notes: notes,
     );
 
@@ -246,7 +258,7 @@ class GrilleRepositoryImpl implements IGrilleRepository {
       await localDataSource.updateLocalFilterReplacement(
         grilleCode: grilleCode,
         filterNumber: filterNumber,
-        payrollCode: payrollCode,
+        payrollCodes: payrollCodes,
         replacedAt: now,
       );
       return true;
@@ -257,7 +269,7 @@ class GrilleRepositoryImpl implements IGrilleRepository {
     await localDataSource.savePendingEvent(
       grilleCode: grilleCode,
       filterNumber: filterNumber,
-      payrollCode: payrollCode,
+      payrollCodes: payrollCodes,
       occurredAt: now,
       notes: notes,
     );

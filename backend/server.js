@@ -265,6 +265,7 @@ async function createTables() {
       grille_code TEXT NOT NULL,
       filter_number INTEGER NOT NULL,
       payroll_code TEXT NOT NULL,
+      payroll_codes TEXT,
       occurred_at_ts TEXT NOT NULL,
       device_installation_id TEXT,
       server_received_at_ts TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -322,6 +323,7 @@ async function createTables() {
     `ALTER TABLE licenses ADD COLUMN status TEXT DEFAULT 'active'`,
     `ALTER TABLE licenses ADD COLUMN created_at_ts TEXT DEFAULT CURRENT_TIMESTAMP`,
     `ALTER TABLE filter_events ADD COLUMN notes TEXT`,
+    `ALTER TABLE filter_events ADD COLUMN payroll_codes TEXT`,
   ];
   for (const m of migrations) {
     try { await dbRun(m); } catch (_) {}
@@ -1120,10 +1122,19 @@ app.get('/api/grilles/status', async (req, res, next) => {
 
 app.post('/api/events', async (req, res, next) => {
   try {
-    const { eventId, grilleCode, filterNumber, payrollCode, occurredAt, deviceInstallationId, notes } = req.body;
+    const { eventId, grilleCode, filterNumber, payrollCode, payrollCodes, occurredAt, deviceInstallationId, notes } = req.body;
 
-    if (!eventId || !grilleCode || filterNumber == null || !payrollCode || !occurredAt) {
-      return res.status(400).json({ error: 'Campos requeridos: eventId, grilleCode, filterNumber, payrollCode, occurredAt' });
+    // Normalizar la lista de códigos de nómina que participaron en el mantenimiento.
+    // payrollCodes (array) tiene prioridad; payrollCode (string) es retrocompatibilidad.
+    let codes = [];
+    if (Array.isArray(payrollCodes) && payrollCodes.length > 0) {
+      codes = payrollCodes.map((c) => String(c).trim().toUpperCase()).filter((c) => c.length > 0);
+    } else if (payrollCode) {
+      codes = [String(payrollCode).trim().toUpperCase()];
+    }
+
+    if (!eventId || !grilleCode || filterNumber == null || codes.length === 0 || !occurredAt) {
+      return res.status(400).json({ error: 'Campos requeridos: eventId, grilleCode, filterNumber, payrollCode(s), occurredAt' });
     }
 
     const existing = await dbQueryGet(`SELECT id FROM filter_events WHERE event_id = ?`, [eventId]);
@@ -1131,17 +1142,19 @@ app.post('/api/events', async (req, res, next) => {
       return res.status(200).json({ success: true, duplicate: true, eventId, message: 'Evento ya registrado previamente.' });
     }
 
+    const primaryPayrollCode = codes[0];
+    const payrollCodesJson = JSON.stringify(codes);
     const id = uuidv4();
     const serverReceivedAt = new Date().toISOString();
-    const payload = JSON.stringify({ eventId, grilleCode, filterNumber, payrollCode, occurredAt, deviceInstallationId, notes, serverReceivedAt });
+    const payload = JSON.stringify({ eventId, grilleCode, filterNumber, payrollCode: primaryPayrollCode, payrollCodes: codes, occurredAt, deviceInstallationId, notes, serverReceivedAt });
     const nextRetry = new Date(Date.now() + 5000).toISOString();
 
     await dbExecTransaction(async () => {
       await dbRun(
         `INSERT INTO filter_events
-         (id, event_id, grille_code, filter_number, payroll_code, occurred_at_ts, device_installation_id, notes, server_received_at_ts, synced, created_at_ts)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)`,
-        [id, eventId, grilleCode, Number(filterNumber), payrollCode, occurredAt, deviceInstallationId || null, notes || null, serverReceivedAt]
+         (id, event_id, grille_code, filter_number, payroll_code, payroll_codes, occurred_at_ts, device_installation_id, notes, server_received_at_ts, synced, created_at_ts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)`,
+        [id, eventId, grilleCode, Number(filterNumber), primaryPayrollCode, payrollCodesJson, occurredAt, deviceInstallationId || null, notes || null, serverReceivedAt]
       );
 
       await dbRun(
@@ -1154,11 +1167,11 @@ app.post('/api/events', async (req, res, next) => {
       await dbRun(
         `INSERT INTO audit_events (id, actor, action, target, details, created_at_ts)
          VALUES (?, 'system', 'event_register', ?, ?, CURRENT_TIMESTAMP)`,
-        [uuidv4(), 'event', JSON.stringify({ eventId, grilleCode, filterNumber, payrollCode })]
+        [uuidv4(), 'event', JSON.stringify({ eventId, grilleCode, filterNumber, payrollCode: primaryPayrollCode, payrollCodes: codes })]
       );
     });
 
-    res.json({ success: true, eventId, id, serverReceivedAt, message: 'Evento registrado y respaldado exitosamente' });
+    res.json({ success: true, eventId, id, serverReceivedAt, payrollCodes: codes, message: 'Evento registrado y respaldado exitosamente' });
   } catch (err) {
     next(err);
   }
@@ -1264,7 +1277,7 @@ app.post('/api/sync/download', async (req, res, next) => {
 
     // Query incremental: eventos nuevos desde el cutoff
     const eventsRows = await dbQueryAll(
-      `SELECT id, event_id, event_type, grille_code, filter_number, payroll_code,
+      `SELECT id, event_id, event_type, grille_code, filter_number, payroll_code, payroll_codes,
               occurred_at_ts, device_installation_id, server_received_at_ts, notes, synced
        FROM filter_events
        WHERE occurred_at_ts >= ?

@@ -95,13 +95,13 @@ class ApiService {
   static Future<bool> registerEvent({
     required String grilleCode,
     required int filterNumber,
-    required String payrollCode,
+    required List<String> payrollCodes,
     String? notes,
   }) async {
     return await getIt<IGrilleRepository>().registerEvent(
       grilleCode: grilleCode,
       filterNumber: filterNumber,
-      payrollCode: payrollCode,
+      payrollCodes: payrollCodes,
       notes: notes,
     );
   }

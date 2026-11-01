@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../di/service_locator.dart';
 import '../models/models.dart';
-import '../repositories/auth_repository.dart';
 import '../repositories/employee_repository.dart';
 import '../repositories/grille_repository.dart';
 
@@ -24,7 +23,6 @@ class MaintenanceDialog extends StatefulWidget {
   final FilterItem? selectedFilter;
   final IGrilleRepository? grilleRepository;
   final IEmployeeRepository? employeeRepository;
-  final IAuthRepository? authRepository;
 
   const MaintenanceDialog({
     super.key,
@@ -32,7 +30,6 @@ class MaintenanceDialog extends StatefulWidget {
     this.selectedFilter,
     this.grilleRepository,
     this.employeeRepository,
-    this.authRepository,
   });
 
   @override
@@ -42,10 +39,9 @@ class MaintenanceDialog extends StatefulWidget {
 class _MaintenanceDialogState extends State<MaintenanceDialog> {
   late final IGrilleRepository _grilleRepository;
   late final IEmployeeRepository _employeeRepository;
-  late final IAuthRepository _authRepository;
 
   final List<Employee> _employees = List.from(defaultEmployees);
-  late String _selectedPayrollCode;
+  final List<String> _selectedPayrollCodes = [];
   late List<int> _selectedFilterNumbers;
   bool _isLoading = false;
   final TextEditingController _payrollController = TextEditingController();
@@ -56,10 +52,6 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
     super.initState();
     _grilleRepository = widget.grilleRepository ?? getIt<IGrilleRepository>();
     _employeeRepository = widget.employeeRepository ?? getIt<IEmployeeRepository>();
-    _authRepository = widget.authRepository ?? getIt<IAuthRepository>();
-
-    _selectedPayrollCode = _employees.isNotEmpty ? _employees.first.payrollCode : '';
-    _payrollController.text = _selectedPayrollCode;
 
     if (widget.selectedFilter != null) {
       _selectedFilterNumbers = [widget.selectedFilter!.filterNumber];
@@ -77,7 +69,6 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
   }
 
   Future<void> _loadEmployees() async {
-    final activeOp = await _authRepository.getActiveOperator();
     final list = await _employeeRepository.getEmployees();
     if (mounted) {
       setState(() {
@@ -85,24 +76,28 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
           _employees.clear();
           _employees.addAll(list);
         }
-        if (activeOp != null && activeOp['code'] != null && activeOp['code']!.isNotEmpty) {
-          _selectedPayrollCode = activeOp['code']!;
-          _payrollController.text = activeOp['code']!;
-        } else if (_employees.isNotEmpty) {
-          _selectedPayrollCode = _employees.first.payrollCode;
-          _payrollController.text = _selectedPayrollCode;
-        }
       });
     }
   }
 
-  Future<void> _submit() async {
-    final inputPayrollCode = _payrollController.text.trim().toUpperCase();
+  void _addCodeFromField(String value) {
+    final code = value.trim().toUpperCase();
+    if (code.isEmpty) return;
+    setState(() {
+      if (!_selectedPayrollCodes.contains(code)) {
+        _selectedPayrollCodes.add(code);
+      }
+      _payrollController.clear();
+    });
+  }
 
-    if (inputPayrollCode.isEmpty) {
+  Future<void> _submit() async {
+    final selectedCodes = List<String>.from(_selectedPayrollCodes);
+
+    if (selectedCodes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Por favor ingrese o seleccione su código de nómina.'),
+          content: Text('Por favor seleccione al menos un código de nómina (operario participante).'),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -121,22 +116,19 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
       empList = await _employeeRepository.getEmployees();
     }
 
-    final activeOp = await _authRepository.getActiveOperator();
-    if (!mounted) return;
-
-    final activeCode = activeOp?['code']?.trim().toUpperCase();
-
-    final existsInList = empList.any((e) => e.payrollCode.trim().toUpperCase() == inputPayrollCode);
-    final isCurrentActiveOp = activeCode != null && activeCode == inputPayrollCode;
-
-    if (!existsInList && !isCurrentActiveOp) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('El código "$inputPayrollCode" no corresponde a ningún operario registrado.'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
-      return;
+    // Validar que todos los códigos seleccionados correspondan a un operario registrado.
+    final validCodes = empList.map((e) => e.payrollCode.trim().toUpperCase()).toSet();
+    for (final code in selectedCodes) {
+      if (!validCodes.contains(code)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('El código "$code" no corresponde a ningún operario registrado.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        return;
+      }
     }
 
     setState(() => _isLoading = true);
@@ -149,7 +141,7 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
         final res = await _grilleRepository.registerEvent(
           grilleCode: widget.grille.code,
           filterNumber: fNum,
-          payrollCode: inputPayrollCode,
+          payrollCodes: selectedCodes,
           notes: _notesController.text.trim().isEmpty
               ? 'Mantenimiento registrado'
               : _notesController.text.trim(),
@@ -260,12 +252,16 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
               ),
               const SizedBox(height: 12),
               const Text(
-                'Técnico / Operario (Código de Nómina):',
+                'Operarios participantes (Código de Nómina):',
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
                   fontSize: 14,
                   color: Colors.white,
                 ),
+              ),
+              const Text(
+                'Seleccione uno o más operarios que realizaron el mantenimiento.',
+                style: TextStyle(fontSize: 11, color: Colors.white54),
               ),
               const SizedBox(height: 6),
               if (_employees.isNotEmpty) ...[
@@ -273,8 +269,8 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
                   spacing: 6,
                   runSpacing: 6,
                   children: _employees.map((emp) {
-                    final isSelected = emp.payrollCode.trim().toUpperCase() == _selectedPayrollCode.trim().toUpperCase();
-                    return ChoiceChip(
+                    final isSelected = _selectedPayrollCodes.contains(emp.payrollCode);
+                    return FilterChip(
                       label: Text(
                         '${emp.payrollCode} (${emp.name})',
                         style: TextStyle(
@@ -287,12 +283,15 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
                       backgroundColor: Colors.black38,
                       checkmarkColor: Colors.black,
                       onSelected: (selected) {
-                        if (selected) {
-                          setState(() {
-                            _selectedPayrollCode = emp.payrollCode;
-                            _payrollController.text = emp.payrollCode;
-                          });
-                        }
+                        setState(() {
+                          if (selected) {
+                            if (!_selectedPayrollCodes.contains(emp.payrollCode)) {
+                              _selectedPayrollCodes.add(emp.payrollCode);
+                            }
+                          } else {
+                            _selectedPayrollCodes.remove(emp.payrollCode);
+                          }
+                        });
                       },
                     );
                   }).toList(),
@@ -303,8 +302,8 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
                 controller: _payrollController,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
-                  labelText: 'Código de Nómina',
-                  hintText: 'Ej. EMP-001',
+                  labelText: 'Agregar otro código de nómina',
+                  hintText: 'Ej. EMP-001 (presione Enter para agregar)',
                   hintStyle: const TextStyle(color: Colors.white38),
                   filled: true,
                   fillColor: Colors.black26,
@@ -321,11 +320,14 @@ class _MaintenanceDialogState extends State<MaintenanceDialog> {
                     vertical: 10,
                   ),
                 ),
-                onChanged: (val) {
-                  setState(() {
-                    _selectedPayrollCode = val.trim().toUpperCase();
-                  });
-                },
+                onSubmitted: _addCodeFromField,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _selectedPayrollCodes.isEmpty
+                    ? 'Sin operarios seleccionados.'
+                    : 'Seleccionados (${_selectedPayrollCodes.length}): ${_selectedPayrollCodes.join(", ")}',
+                style: const TextStyle(fontSize: 12, color: Colors.cyanAccent),
               ),
               const SizedBox(height: 12),
               const Text(

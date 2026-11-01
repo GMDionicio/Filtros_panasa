@@ -21,7 +21,7 @@ abstract class LocalDataSource {
   Future<void> savePendingEvent({
     required String grilleCode,
     required int filterNumber,
-    required String payrollCode,
+    required List<String> payrollCodes,
     required DateTime occurredAt,
     String? notes,
   });
@@ -30,7 +30,7 @@ abstract class LocalDataSource {
   Future<void> updateLocalFilterReplacement({
     required String grilleCode,
     required int filterNumber,
-    required String payrollCode,
+    required List<String> payrollCodes,
     required DateTime replacedAt,
   });
   Future<void> clearLocalGrillesAndEvents();
@@ -47,7 +47,7 @@ class LocalDataSourceImpl implements LocalDataSource {
       final path = p.join(dbPath, 'filtros_panasa_local.db');
       _db = await openDatabase(
         path,
-        version: 2,
+        version: 3,
         onCreate: (db, version) async {
           await db.execute('''
             CREATE TABLE grilles (
@@ -63,7 +63,8 @@ class LocalDataSourceImpl implements LocalDataSource {
               filter_number INTEGER,
               position_label TEXT,
               last_replaced_at TEXT,
-              last_employee_code TEXT
+              last_employee_code TEXT,
+              last_employee_codes TEXT
             )
           ''');
           await db.execute('''
@@ -73,6 +74,7 @@ class LocalDataSourceImpl implements LocalDataSource {
               grille_code TEXT,
               filter_number INTEGER,
               payroll_code TEXT,
+              payroll_codes TEXT,
               occurred_at TEXT,
               notes TEXT
             )
@@ -106,6 +108,10 @@ class LocalDataSourceImpl implements LocalDataSource {
                 active INTEGER
               )
             ''');
+          }
+          if (oldVersion < 3) {
+            await db.execute('ALTER TABLE filters ADD COLUMN last_employee_codes TEXT');
+            await db.execute('ALTER TABLE pending_events ADD COLUMN payroll_codes TEXT');
           }
         },
       );
@@ -323,6 +329,7 @@ class LocalDataSourceImpl implements LocalDataSource {
                   'position_label': f.positionLabel,
                   'last_replaced_at': f.lastReplacedAt?.toIso8601String(),
                   'last_employee_code': f.lastEmployeeCode,
+                  'last_employee_codes': jsonEncode(f.lastEmployeeCodes),
                 },
                 conflictAlgorithm: ConflictAlgorithm.replace,
               );
@@ -349,6 +356,7 @@ class LocalDataSourceImpl implements LocalDataSource {
           'position_label': f.positionLabel,
           'last_replaced_at': f.lastReplacedAt?.toIso8601String(),
           'last_employee_code': f.lastEmployeeCode,
+          'last_employee_codes': f.lastEmployeeCodes,
         }).toList(),
       }).toList();
       await prefs.setString('grilles_data', jsonEncode(data));
@@ -379,6 +387,7 @@ class LocalDataSourceImpl implements LocalDataSource {
                   ? DateTime.tryParse(f['last_replaced_at'] as String)
                   : null,
               lastEmployeeCode: f['last_employee_code'] as String?,
+              lastEmployeeCodes: parseEmployeeCodes(f['last_employee_codes']),
             ));
           }
 
@@ -419,6 +428,7 @@ class LocalDataSourceImpl implements LocalDataSource {
                   ? DateTime.tryParse(f['last_replaced_at'])
                   : null,
               lastEmployeeCode: f['last_employee_code'],
+              lastEmployeeCodes: parseEmployeeCodes(f['last_employee_codes']),
             )).toList(),
           );
         }).toList();
@@ -434,17 +444,19 @@ class LocalDataSourceImpl implements LocalDataSource {
   Future<void> savePendingEvent({
     required String grilleCode,
     required int filterNumber,
-    required String payrollCode,
+    required List<String> payrollCodes,
     required DateTime occurredAt,
     String? notes,
   }) async {
     final id = '${grilleCode}_${filterNumber}_${occurredAt.millisecondsSinceEpoch}';
+    final primaryCode = payrollCodes.isNotEmpty ? payrollCodes.first : '';
     final eventMap = {
       'id': id,
       'event_id': 'EVT-OFFLINE-${DateTime.now().millisecondsSinceEpoch}-$filterNumber',
       'grille_code': grilleCode,
       'filter_number': filterNumber,
-      'payroll_code': payrollCode,
+      'payroll_code': primaryCode,
+      'payroll_codes': jsonEncode(payrollCodes),
       'occurred_at': occurredAt.toUtc().toIso8601String(),
       'notes': notes ?? 'Mantenimiento registrado offline',
     };
@@ -475,7 +487,7 @@ class LocalDataSourceImpl implements LocalDataSource {
     await updateLocalFilterReplacement(
       grilleCode: grilleCode,
       filterNumber: filterNumber,
-      payrollCode: payrollCode,
+      payrollCodes: payrollCodes,
       replacedAt: occurredAt,
     );
   }
@@ -536,7 +548,7 @@ class LocalDataSourceImpl implements LocalDataSource {
   Future<void> updateLocalFilterReplacement({
     required String grilleCode,
     required int filterNumber,
-    required String payrollCode,
+    required List<String> payrollCodes,
     required DateTime replacedAt,
   }) async {
     final cached = await loadCachedGrilles();
@@ -553,7 +565,8 @@ class LocalDataSourceImpl implements LocalDataSource {
               filterNumber: f.filterNumber,
               positionLabel: f.positionLabel,
               lastReplacedAt: replacedAt,
-              lastEmployeeCode: payrollCode,
+              lastEmployeeCode: payrollCodes.isNotEmpty ? payrollCodes.first : f.lastEmployeeCode,
+              lastEmployeeCodes: payrollCodes,
             );
           }
         }

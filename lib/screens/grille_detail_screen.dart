@@ -256,9 +256,11 @@ class _GrilleDetailScreenState extends State<GrilleDetailScreen> {
                           ),
                           const Spacer(),
                           Text(
-                            filter.lastEmployeeCode != null
-                                ? 'Por: ${filter.lastEmployeeCode}'
-                                : 'Sin registro',
+                            filter.lastEmployeeCodes.isNotEmpty
+                                ? 'Por: ${filter.lastEmployeeCodes.join(', ')}'
+                                : (filter.lastEmployeeCode != null
+                                    ? 'Por: ${filter.lastEmployeeCode}'
+                                    : 'Sin registro'),
                             style: const TextStyle(
                               fontSize: 11,
                               color: Colors.white70,
